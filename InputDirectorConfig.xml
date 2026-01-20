@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<InputDirectorConfig ver="2.3" idver="2.3.0">
+    <GlobalPrefs>
+        <RunOnStartup>true</RunOnStartup>
+        <StartupState>Enabled</StartupState>
+        <ShareClipboard excludeDefaultShares="true" FileCopyMode="UseIDFileCopy">true</ShareClipboard>
+        <CursorWaterRipple>true</CursorWaterRipple>
+        <HideCursor>true</HideCursor>
+        <CursorSwitchLocation>CenterCursor</CursorSwitchLocation>
+        <CheckForNewVersions>true</CheckForNewVersions>
+        <AllowScreenEdgeTransitions>true</AllowScreenEdgeTransitions>
+        <RememberScreenEdgeTransitionChoice>false</RememberScreenEdgeTransitionChoice>
+        <DisableUnderRemoteDesktop>true</DisableUnderRemoteDesktop>
+        <ListenPort>31234</ListenPort>
+        <PreferredNetwork/>
+        <HideWarnings>
+            <NoSystemResponse>PromptUser</NoSystemResponse>
+            <OlderVersion>false</OlderVersion>
+            <ClipboardPasteError>false</ClipboardPasteError>
+            <SystemAvailable>false</SystemAvailable>
+            <SystemUnavailable>false</SystemUnavailable>
+            <RemoteFileOpened>false</RemoteFileOpened>
+            <ProfileChanged>false</ProfileChanged>
+            <IDDeactivatedWhenRemoteDesktopActive>false</IDDeactivatedWhenRemoteDesktopActive>
+        </HideWarnings>
+        <InfoWindow show="false"/>
+    </GlobalPrefs>
+    <Security>
+        <AccessControl type="AnyComputer"/>
+        <SynchroniseLockWithDirector>false</SynchroniseLockWithDirector>
+        <KeepSystemAwakeWhilstIDActive>false</KeepSystemAwakeWhilstIDActive>
+        <DirectedShutdownMode>DoNothing</DirectedShutdownMode>
+        <AllowIntegrationExtensions>true</AllowIntegrationExtensions>
+        <AdminOnlyChanges>false</AdminOnlyChanges>
+        <Encryption type="None"/>
+    </Security>
+    <DirectorPrefs>
+        <KeyboardMousePrefs>
+            <UseDirectorSystemMousePrefs ApplyMouseEnhancedPrecision="false">true</UseDirectorSystemMousePrefs>
+            <UseDirectorSystemKeybdPrefs>false</UseDirectorSystemKeybdPrefs>
+            <KeyBdLEDsReflectDirectedSystem>true</KeyBdLEDsReflectDirectedSystem>
+            <ReturnToDirectorHotkey>
+                <Key key="LeftCtrl"/>
+                <Key key="LeftAlt"/>
+                <Key key="CtrlBrk"/>
+            </ReturnToDirectorHotkey>
+            <CtrlAltDelHotkey>
+                <Key key="LeftCtrl"/>
+                <Key key="LeftAlt"/>
+                <Key key="Insert"/>
+            </CtrlAltDelHotkey>
+            <LockWindowsHotkey>
+                <Key key="LeftCtrl"/>
+                <Key key="LeftWin"/>
+                <Key key="L"/>
+            </LockWindowsHotkey>
+        </KeyboardMousePrefs>
+        <Transition type="Immediate" NoTransitionsInScreenCorners="false" NoTransitionsIfFullScreenAppActive="false">
+            <TransitionHeldKeys/>
+            <HotkeysJumpBetweenMonitors>false</HotkeysJumpBetweenMonitors>
+            <MoveSystemToLeftHotkey/>
+            <MoveSystemToRightHotkey/>
+            <MoveSystemAboveHotkey/>
+            <MoveSystemBelowHotkey/>
+            <CycleToNextSystemHotkey/>
+            <ScreenedgeControl mode="SeparateHotkeys">
+                <EnableHotkey/>
+                <DisableHotkey/>
+            </ScreenedgeControl>
+        </Transition>
+        <MirrorControl type="KeyboardAndMouse" clientprimaryscreenonly="false" autoaddclients="false" directorprimaryscreenonly="false" lockcursortodirectorprimaryscreen="false" userelativemousemovement="false" syncinitialclientcursor="true">
+            <Hotkey>
+                <Key key="LeftCtrl"/>
+                <Key key="LeftWin"/>
+                <Key key="M"/>
+            </Hotkey>
+        </MirrorControl>
+        <Advanced>
+            <UseReliableCommsMode>false</UseReliableCommsMode>
+            <SystemResponseWaitTime>2</SystemResponseWaitTime>
+            <CursorToDirectorIdleTimeout>0</CursorToDirectorIdleTimeout>
+            <AutoUpdateSystemsAvailabilityStatus>true</AutoUpdateSystemsAvailabilityStatus>
+            <UseCachedIPAddresses>true</UseCachedIPAddresses>
+            <RefreshIPsOnNetworkChange>false</RefreshIPsOnNetworkChange>
+            <FrequencyToCheckSystemsAvailable>0</FrequencyToCheckSystemsAvailable>
+            <AllowSynthesisedInput>false</AllowSynthesisedInput>
+            <RescanSystemsWhenWoken>true</RescanSystemsWhenWoken>
+            <WakeOnLanSystemsOnStart>true</WakeOnLanSystemsOnStart>
+            <NetworkSendFrequency>0</NetworkSendFrequency>
+            <RescanSystemsHotkey/>
+        </Advanced>
+    </DirectorPrefs>
+    <Configuration>
+        <Profiles ActiveProfile="1">
+            <Profile Name="Profile #1" CursorWrapAround="false" SetClientSystemsToSkipOnStartup="false" Automode="Manual" AutoNumDirMons="2">
+                <Hotkey/>
+                <Systems>
+                    <DirectorMonitorLayout>
+                        <Monitor left="0" top="0" right="18" bottom="11"/>
+                    </DirectorMonitorLayout>
+                </Systems>
+            </Profile>
+        </Profiles>
+        <Bindings/>
+        <Macros/>
+    </Configuration>
+</InputDirectorConfig>
