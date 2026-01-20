@@ -1,43 +1,45 @@
-#v9 Final Cloud Version (Git Push Method)
+#v6 Final Hybrid Version (Repo for Code, Releases for Big Files)
 
-# --- CONFIGURATION ---
-# 1. Push your files to GitHub.
-# 2. Click the "SetupGFX1.ps1" file on GitHub, click "Raw".
-# 3. Copy that URL, but DELETE the filename at the end.
-#    It should look like: https://raw.githubusercontent.com/User/Repo/main
-$BaseUrl = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main"
-# ---------------------
+# --- CONFIGURATION START ---
+
+# 1. GITHUB REPO RAW URL (For the XML config file)
+#    (Example: https://raw.githubusercontent.com/User/Repo/main)
+$RepoRawUrl = "https://raw.githubusercontent.com/AbstractSyntax/GFX_Scripts/main"
+
+# 2. GITHUB RELEASE LINKS (For the Big EXE files)
+#    Paste the links you copied from the "Releases" page here:
+$Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.build173.Domain.Setup.exe"
+$Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/TallyViewer.exe"
+$Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe"
+
+# --- CONFIGURATION END ---
 
 $TempDir = "$env:TEMP\GFXSetup"
-$ErrorActionPreference = "Stop" # Stop script if download fails
-
-# Clean/Create Temp Directory
 if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
-
 Write-Host "--- Starting Cloud Setup ---" -ForegroundColor Cyan
 
-# Function to download files
-function Get-CloudFile {
-    param ($FileName)
-    $Url = "$BaseUrl/$FileName"
+# Function to download
+function Download-File {
+    param ($Url, $FileName)
     $Dest = "$TempDir\$FileName"
     try {
-        Write-Host "Downloading: $FileName..." -ForegroundColor Gray
+        Write-Host "Downloading $FileName..." -ForegroundColor Gray
         Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
     } catch {
-        Write-Host "Error downloading $FileName. Verify the file is in your GitHub repo and the URL is correct." -ForegroundColor Red
+        Write-Host "Error downloading $FileName. Check URL." -ForegroundColor Red
         return $null
     }
     return $Dest
 }
 
-# --- Download All Assets ---
-# Note: Ensure the filenames inside quotes match your actual files on GitHub exactly
-$inputDirectorInstaller = Get-CloudFile "InputDirector.v2.3.build173.Domain.Setup.exe"
-$inputDirectorConfig    = Get-CloudFile "InputDirectorConfig.xml"
-$tallyViewerExe         = Get-CloudFile "TallyViewer.exe"
-$agentExe               = Get-CloudFile "agent.exe"
+# --- Download Phase ---
+$inputDirectorInstaller = Download-File $Link_InputDirector "InputDirectorSetup.exe"
+$tallyViewerExe         = Download-File $Link_TallyViewer   "TallyViewer.exe"
+$agentExe               = Download-File $Link_Agent         "agent.exe"
+
+# Download XML Config from the Raw Code Repo
+$inputDirectorConfig = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
 
 # --- SYSTEM CONFIGURATION ---
 
@@ -60,7 +62,7 @@ if (!(Test-Path $regPathPol)) { New-Item -Path $regPathPol -Force | Out-Null }
 Set-ItemProperty -Path $regPathPol -Name "AllowInsecureGuestAuth" -Value 1 -Type DWord
 Set-ItemProperty -Path $regPathSvc -Name "AllowInsecureGuestAuth" -Value 1 -Type DWord
 
-# 4. Refresh Network Stack
+# 4. Refresh Network
 cmd /c "sc stop lanmanworkstation > nul 2>&1"
 cmd /c "sc start lanmanworkstation > nul 2>&1"
 
@@ -75,10 +77,9 @@ if (!(Get-SmbShare -Name "GFX1" -ErrorAction SilentlyContinue)) {
     Write-Host "Share GFX1 Created." -ForegroundColor Green
 }
 
-# 6. Windows 11 UI Fixes (Taskbar Left, Classic Context)
+# 6. Windows 11 UI Fixes
 $explorerAdvPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
 if (Test-Path $explorerAdvPath) { Set-ItemProperty -Path $explorerAdvPath -Name "TaskbarAl" -Value 0 -Type DWord }
-
 $clsidPath = "HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
 if (!(Test-Path $clsidPath)) { New-Item -Path $clsidPath -Force | Out-Null }
 Set-Item -Path $clsidPath -Value ""
@@ -86,7 +87,7 @@ Set-Item -Path $clsidPath -Value ""
 # 7. Display Settings
 Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "LogPixels" -Value 96
 
-# --- INSTALLATION & FILES ---
+# --- INSTALLATION ---
 
 # Install Input Director
 if ($inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
