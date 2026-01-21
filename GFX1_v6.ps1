@@ -1,4 +1,4 @@
-# v16 Final Hybrid - Office Security Bypass Edition
+# v18 Final Hybrid - Fixed Filename with Spaces
 # Run as Administrator
 
 # --- CONFIGURATION ---
@@ -11,6 +11,7 @@ $Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/do
 $OSCTargetIP = "192.168.8.142"
 $TempDir = "C:\GFX_Temp_Setup"
 $oscDir = "C:\OSCPoint"
+$vstoName = "OSCPoint add-in.vsto" # Updated filename with space
 
 # --- PREP ---
 if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force }
@@ -22,11 +23,11 @@ function Download-File {
     try {
         Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -MaximumRedirection 5
         if (Test-Path $Dest) { return $Dest }
-    } catch { Write-Host "Download Error: $FileName" -ForegroundColor Red }
+    } catch { Write-Host "Download Failed: $FileName" -ForegroundColor Red }
     return $null
 }
 
-Write-Host "--- Starting Setup v16 ---" -ForegroundColor Cyan
+Write-Host "--- Starting Setup v18 ---" -ForegroundColor Cyan
 Get-Process "powerpnt" -ErrorAction SilentlyContinue | Stop-Process -Force
 
 # Downloads
@@ -36,48 +37,50 @@ $tallyExe = Download-File $Link_TallyViewer "TallyViewer.exe"
 $agentExe = Download-File $Link_Agent "agent.exe"
 
 # --- OSCPOINT STAGE ---
+Write-Host "`n[OSCPoint Stage]" -ForegroundColor Cyan
 if ($oscZip) {
-    Write-Host "[OSCPoint Stage] Extracting and Registering..." -ForegroundColor Yellow
     if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force }
     New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
+    
+    Write-Host "Extracting to $oscDir..." -ForegroundColor Gray
     Expand-Archive -Path $oscZip -DestinationPath $oscDir -Force
-    Get-ChildItem -Path $oscDir -Recurse | Unblock-File
+    
+    # Locate the VSTO file (Searching for the specific name with the space)
+    $vstoFile = Get-ChildItem -Path $oscDir -Filter "$vstoName" -Recurse | Select-Object -First 1
 
-    $vstoFile = Get-ChildItem -Path $oscDir -Filter "OSCPoint.vsto" -Recurse | Select-Object -First 1
+    if ($null -eq $vstoFile) {
+        Write-Host "ERROR: Could not find '$vstoName' in $oscDir" -ForegroundColor Red
+        # Fallback: Look for any VSTO file if the name above is slightly different
+        $vstoFile = Get-ChildItem -Path $oscDir -Filter "*.vsto" -Recurse | Select-Object -First 1
+    }
 
     if ($vstoFile) {
         $vstoPath = $vstoFile.FullName
-        Write-Host "Found VSTO: $vstoPath" -ForegroundColor Gray
+        Write-Host "SUCCESS: Found VSTO at $vstoPath" -ForegroundColor Green
 
-        # 1. TRUST CERTIFICATE
+        # 1. UNBLOCK
+        Get-ChildItem -Path $oscDir -Recurse | Unblock-File
+
+        # 2. TRUST CERTIFICATE
         $cert = (Get-AuthenticodeSignature $vstoPath).SignerCertificate
         if ($cert) {
             foreach ($s in @("Root", "TrustedPublisher")) {
                 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($s, "LocalMachine")
                 $store.Open("ReadWrite"); $store.Add($cert); $store.Close()
             }
+            Write-Host "Certificate Trusted." -ForegroundColor Gray
         }
 
-        # 2. ADD TO POWERPOINT TRUSTED LOCATIONS (Registry)
-        # We target versions 14, 15, and 16 (covers Office 2010 through 365)
-        foreach ($ver in @("14.0", "15.0", "16.0")) {
-            $trustPath = "HKCU:\Software\Microsoft\Office\$ver\PowerPoint\Security\Trusted Locations\OSCPoint"
-            if (!(Test-Path $trustPath)) { New-Item $trustPath -Force | Out-Null }
-            Set-ItemProperty $trustPath -Name "Path" -Value $oscDir
-            Set-ItemProperty $trustPath -Name "AllowSubfolders" -Value 1 -Type DWord
-            Set-ItemProperty $trustPath -Name "Description" -Value "OSCPoint Setup"
+        # 3. RUN SILENT INSTALLER
+        Write-Host "Running VSTO Installer..." -ForegroundColor Gray
+        $vstoInstaller = "$env:CommonProgramFiles\microsoft shared\VSTO\10.0\VSTOInstaller.exe"
+        if (Test-Path $vstoInstaller) {
+            Start-Process $vstoInstaller -ArgumentList "/i `"$vstoPath`" /s" -Wait
         }
 
-        # 3. ADD TO CLICKONCE INCLUSION LIST (Bypasses the "Are you sure?" prompt)
-        $publicKey = [System.Convert]::ToBase64String($cert.GetPublicKey())
-        $inclusionPath = "HKCU:\Software\Microsoft\VSTO\Security\Inclusion\OSCPoint" # Some versions use the RSA key here, we'll use a named key
-        if (!(Test-Path $inclusionPath)) { New-Item $inclusionPath -Force | Out-Null }
-        Set-ItemProperty $inclusionPath -Name "Url" -Value "file:///$($vstoPath.Replace('\','/'))"
-        Set-ItemProperty $inclusionPath -Name "PublicKey" -Value "<RSAKeyValue><Modulus>$publicKey</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>"
-
-        # 4. REGISTER ADD-IN FOR POWERPOINT
-        # Using the file:/// format with |vstolocal is the most stable method
-        $manifestPath = "file:///$($vstoPath.Replace('\','/'))|vstolocal"
+        # 4. FORCE REGISTRY REGISTRATION
+        # This points PowerPoint directly to the extracted file
+        $manifestValue = "file:///$($vstoPath.Replace('\','/'))|vstolocal"
         $regPaths = @(
             "HKCU:\Software\Microsoft\Office\PowerPoint\Addins\OSCPoint",
             "HKLM:\SOFTWARE\Microsoft\Office\PowerPoint\Addins\OSCPoint",
@@ -86,14 +89,13 @@ if ($oscZip) {
         foreach ($rp in $regPaths) {
             if (!(Test-Path $rp)) { New-Item $rp -Force -ErrorAction SilentlyContinue | Out-Null }
             if (Test-Path $rp) {
-                Set-ItemProperty $rp -Name "Manifest" -Value $manifestPath
+                Set-ItemProperty $rp -Name "Manifest" -Value $manifestValue
                 Set-ItemProperty $rp -Name "LoadBehavior" -Value 3 -Type DWord
                 Set-ItemProperty $rp -Name "FriendlyName" -Value "OSCPoint"
-                Set-ItemProperty $rp -Name "Description" -Value "OSC Feedback for PowerPoint"
             }
         }
 
-        # 5. CONFIGURATION
+        # 5. OSC FEEDBACK CONFIG (Point to 192.168.8.142)
         $oscConfig = "HKCU:\Software\Zinc Event Production Ltd\OSCPoint"
         if (!(Test-Path $oscConfig)) { New-Item $oscConfig -Force | Out-Null }
         Set-ItemProperty $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
@@ -101,33 +103,36 @@ if ($oscZip) {
         Set-ItemProperty $oscConfig -Name "RemotePort" -Value 9000
         Set-ItemProperty $oscConfig -Name "LocalPort" -Value 8000
         
-        Write-Host "SUCCESS: OSCPoint security bypasses applied." -ForegroundColor Green
+        # 6. FIREWALL
+        $ppPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\powerpnt.exe" -ErrorAction SilentlyContinue)."(default)"
+        if ($ppPath) {
+            New-NetFirewallRule -DisplayName "OSCPoint (PowerPoint)" -Direction Inbound -Program $ppPath -Action Allow -Protocol UDP -LocalPort 8000 -Profile Any -ErrorAction SilentlyContinue
+        }
+        Write-Host "OSCPoint Deployment Finished." -ForegroundColor Green
+    } else {
+        Write-Host "CRITICAL ERROR: Could not find any .vsto file!" -ForegroundColor Red
     }
 }
 
-# --- REMAINING APPS ---
-Write-Host "[Other Apps Stage]" -ForegroundColor Cyan
+# --- OTHER APPS ---
+Write-Host "`n[Other Apps Stage]" -ForegroundColor Cyan
 
-# Agent
 if ($agentExe) {
     $dest = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
     Copy-Item $agentExe $dest -Force -ErrorAction SilentlyContinue
     Unblock-File $dest -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "GFX Agent" -Direction Inbound -Program $dest -Action Allow -Profile Any -ErrorAction SilentlyContinue
 }
 
-# Tally
 if ($tallyExe) {
     Copy-Item $tallyExe "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
 }
 
-# Input Director
 if ($idInstaller) {
     Start-Process $idInstaller -ArgumentList "/S" -Wait
 }
 
-# Final Clean and Restart
+# Cleanup and Restart
 Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "Setup Complete. Restarting..." -ForegroundColor Yellow
+Write-Host "`nSetup Finished. Restarting..." -ForegroundColor Yellow
 Start-Sleep -Seconds 5
 #Restart-Computer -Force
