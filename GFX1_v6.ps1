@@ -1,16 +1,15 @@
-#v6 Final Hybrid Version (Repo for Code, Releases for Big Files)
+#v7 Hybrid Version (Added OSCPoint Auto-Install & Config)
 
 # --- CONFIGURATION START ---
 
-# 1. GITHUB REPO RAW URL (For the XML config file)
-#    (Example: https://raw.githubusercontent.com/User/Repo/main)
 $RepoRawUrl = "https://raw.githubusercontent.com/AbstractSyntax/GFX_Scripts/main"
 
-# 2. GITHUB RELEASE LINKS (For the Big EXE files)
-#    Paste the links you copied from the "Releases" page here:
+# GitHub Release Links
 $Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.build173.Domain.Setup.exe"
 $Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/TallyViewer.exe"
 $Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe"
+# ADDED: Link to your OSCPoint ZIP
+$Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/OSCPoint.zip"
 
 # --- CONFIGURATION END ---
 
@@ -19,7 +18,6 @@ if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 Write-Host "--- Starting Cloud Setup ---" -ForegroundColor Cyan
 
-# Function to download
 function Download-File {
     param ($Url, $FileName)
     $Dest = "$TempDir\$FileName"
@@ -37,6 +35,7 @@ function Download-File {
 $inputDirectorInstaller = Download-File $Link_InputDirector "InputDirectorSetup.exe"
 $tallyViewerExe         = Download-File $Link_TallyViewer   "TallyViewer.exe"
 $agentExe               = Download-File $Link_Agent         "agent.exe"
+$oscZip                 = Download-File $Link_OSCPoint      "OSCPoint.zip" # Download Zip
 
 # Download XML Config from the Raw Code Repo
 $inputDirectorConfig = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
@@ -49,33 +48,22 @@ if ((Get-ComputerInfo).WindowsProductName -notlike "*GFX1*") {
     Write-Host "Renaming Computer to GFX1..." -ForegroundColor Yellow
 }
 
-# 2. SMB & Services
+# [ ... Sections 2 through 5 remain the same as your original script ... ]
 Set-SmbServerConfiguration -EnableSMB2Protocol $true -Force
 Set-Service -Name "LanmanServer" -StartupType Automatic; Start-Service "LanmanServer"
 Set-Service -Name "fdPHost" -StartupType Automatic; Start-Service "fdPHost"
-
-# 3. Registry: NTLM & Guest Access
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Lsa" -Name "LMCompatibilityLevel" -Value 1
 $regPathPol = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation"
 $regPathSvc = "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
 if (!(Test-Path $regPathPol)) { New-Item -Path $regPathPol -Force | Out-Null }
 Set-ItemProperty -Path $regPathPol -Name "AllowInsecureGuestAuth" -Value 1 -Type DWord
 Set-ItemProperty -Path $regPathSvc -Name "AllowInsecureGuestAuth" -Value 1 -Type DWord
-
-# 4. Refresh Network
-cmd /c "sc stop lanmanworkstation > nul 2>&1"
-cmd /c "sc start lanmanworkstation > nul 2>&1"
-
-# 5. Create Desktop Share
+cmd /c "sc stop lanmanworkstation > nul 2>&1"; cmd /c "sc start lanmanworkstation > nul 2>&1"
 $sharedFolderPath = "$env:USERPROFILE\Desktop\GFX1"
-New-Item -ItemType Directory -Path $sharedFolderPath -Force | Out-Null
+if (!(Test-Path $sharedFolderPath)) { New-Item -ItemType Directory -Path $sharedFolderPath -Force | Out-Null }
 Set-NetFirewallRule -DisplayGroup "Network Discovery" -Enabled True
 Set-NetFirewallRule -DisplayGroup "File and Printer Sharing" -Enabled True
-
-if (!(Get-SmbShare -Name "GFX1" -ErrorAction SilentlyContinue)) {
-    New-SmbShare -Name "GFX1" -Path $sharedFolderPath -FullAccess "Everyone"
-    Write-Host "Share GFX1 Created." -ForegroundColor Green
-}
+if (!(Get-SmbShare -Name "GFX1" -ErrorAction SilentlyContinue)) { New-SmbShare -Name "GFX1" -Path $sharedFolderPath -FullAccess "Everyone" }
 
 # 6. Windows 11 UI Fixes
 $explorerAdvPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
@@ -94,27 +82,110 @@ Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "Win8DpiScaling" -Val
 if ($inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
     Write-Host "Installing Input Director..." -ForegroundColor Yellow
     Start-Process -FilePath $inputDirectorInstaller -ArgumentList "/S" -Wait
-    
-    # Import Config
     if ($inputDirectorConfig -and (Test-Path $inputDirectorConfig)) {
         $idCmdPath = if ([Environment]::Is64BitOperatingSystem) { "C:\Program Files\Input Director\IDCmd.exe" } else { "C:\Program Files (x86)\Input Director\IDCmd.exe" }
-        if (Test-Path $idCmdPath) {
-            Start-Process -FilePath $idCmdPath -ArgumentList "-importconfig:`"$inputDirectorConfig`"" -Wait
-            Write-Host "Input Director Config Imported." -ForegroundColor Green
+        if (Test-Path $idCmdPath) { Start-Process -FilePath $idCmdPath -ArgumentList "-importconfig:`"$inputDirectorConfig`"" -Wait }
+    }
+}
+
+# ADDED: OSCPoint Installation
+if ($oscZip -and (Test-Path $oscZip)) {
+    Unblock-File -Path $oscZip
+    Write-Host "Installing OSCPoint..." -ForegroundColor Yellow
+    $oscExtracted = "$TempDir\OSCPoint"
+    Expand-Archive -Path $oscZip -DestinationPath $oscExtracted -Force
+    
+    # Locate the .vsto file inside the extracted zip
+    $vstoFile = Get-ChildItem -Path $oscExtracted -Filter "*.vsto" -Recurse | Select-Object -First 1
+    
+    if ($vstoFile) {
+        # Trust the certificate so it installs without a prompt
+        $cert = (Get-AuthenticodeSignature $vstoFile.FullName).SignerCertificate
+        if ($cert) {
+            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPublisher", "LocalMachine")
+            $store.Open("ReadWrite")
+            $store.Add($cert)
+            $store.Close()
+        }
+
+        # Run the VSTO Silent Installer
+        $vstoInstaller = "$env:CommonProgramFiles\microsoft shared\VSTO\10.0\VSTOInstaller.exe"
+        if (Test-Path $vstoInstaller) {
+            Start-Process $vstoInstaller -ArgumentList "/i `"$($vstoFile.FullName)`" /s" -Wait
+            Write-Host "OSCPoint Installed Successfully." -ForegroundColor Green
         }
     }
+}
+
+# ADDED: OSCPoint Registry Configuration
+Write-Host "Configuring OSCPoint Settings..." -ForegroundColor Gray
+$oscRegPath = "HKCU:\Software\Zinc Event Production Ltd\OSCPoint"
+if (!(Test-Path $oscRegPath)) { New-Item -Path $oscRegPath -Force | Out-Null }
+Set-ItemProperty -Path $oscRegPath -Name "RemoteHost" -Value "192.168.8.142"
+Set-ItemProperty -Path $oscRegPath -Name "FeedbackEnabled" -Value "True"
+Set-ItemProperty -Path $oscRegPath -Name "RemotePort" -Value 9000
+Set-ItemProperty -Path $oscRegPath -Name "LocalPort" -Value 8000
+
+# --- Firewall Rule for OSCPoint (PowerPoint) ---
+Write-Host "Creating Firewall Rule for PowerPoint/OSCPoint..." -ForegroundColor Gray
+
+# 1. Find the PowerPoint executable path dynamically
+$ppPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\powerpnt.exe")."(default)"
+
+if ($ppPath -and (Test-Path $ppPath)) {
+    $ruleName = "Allow_OSCPoint_PowerPoint"
+    
+    # Check if rule exists; if not, create it
+    if (!(Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue)) {
+        # We allow PowerPoint to communicate on all profiles to ensure OSC works on show networks
+        New-NetFirewallRule -Name $ruleName `
+                            -DisplayName "OSCPoint (PowerPoint)" `
+                            -Description "Allows OSCPoint add-in to receive OSC messages inside PowerPoint." `
+                            -Direction Inbound `
+                            -Program $ppPath `
+                            -Action Allow `
+                            -Protocol UDP `
+                            -LocalPort 8000 `
+                            -Profile Any
+        Write-Host "Firewall rule created for PowerPoint on UDP Port 8000." -ForegroundColor Green
+    }
+} else {
+    Write-Warning "Could not locate powerpnt.exe. Firewall rule not created."
 }
 
 # Copy TallyViewer
 if ($tallyViewerExe -and (Test-Path $tallyViewerExe)) {
     Copy-Item -Path $tallyViewerExe -Destination "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
-    Write-Host "TallyViewer copied to Desktop." -ForegroundColor Green
 }
 
-# Autostart Agent
+# Autostart Agent + Trust & Firewall Rule
 if ($agentExe -and (Test-Path $agentExe)) {
-    Copy-Item -Path $agentExe -Destination "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe" -Force
-    Write-Host "Agent.exe set to autostart." -ForegroundColor Green
+    $agentDestination = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
+    
+    # 1. Copy to startup
+    Copy-Item -Path $agentExe -Destination $agentDestination -Force
+    
+    # 2. Unblock the file (removes the "this file came from another computer" security flag)
+    Unblock-File -Path $agentDestination
+    
+    # 3. Create Firewall Rule (Prevents the "Allow this app on your network" popup)
+    Write-Host "Creating Firewall Rule for Agent.exe..." -ForegroundColor Gray
+    $ruleName = "Allow_GFX_Agent"
+    
+    # Check if rule exists; if not, create it
+    if (!(Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name $ruleName `
+                            -DisplayName "GFX Agent (Auto-Allowed)" `
+                            -Description "Allows Agent.exe to communicate on the network without prompts." `
+                            -Direction Inbound `
+                            -Program $agentDestination `
+                            -Action Allow `
+                            -Protocol Any `
+                            -Profile Any
+        Write-Host "Firewall rule created for Agent." -ForegroundColor Green
+    }
+    
+    Write-Host "Agent.exe set to autostart and trusted." -ForegroundColor Green
 }
 
 # Cleanup
