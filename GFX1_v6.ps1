@@ -11,9 +11,10 @@ $Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/do
 $Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
 $Link_VSTO_Runtime  = "https://go.microsoft.com/fwlink/?LinkId=158918" 
 
+# OSCPoint Settings
 $OSCTargetIP = "192.168.8.142"
-$LocalPort   = 8000
-$RemotePort  = 9000
+$RemotePort  = 35550
+$LocalPort   = 35551
 # --- CONFIGURATION END ---
 
 $TempDir = "$env:TEMP\GFXSetup"
@@ -29,7 +30,8 @@ function Download-File {
     try {
         Write-Host "Downloading $FileName..." -ForegroundColor Gray
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -ErrorAction Stop
+        # UserAgent prevents GitHub 403 errors
+        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -UserAgent "Mozilla/5.0" -ErrorAction Stop
         return $Dest
     } catch { 
         Write-Warning "Failed to download $FileName. Check URL or Internet."
@@ -42,6 +44,7 @@ $inputDirectorInstaller = Download-File $Link_InputDirector "InputDirectorSetup.
 $tallyViewerExe         = Download-File $Link_TallyViewer   "TallyViewer.exe"
 $agentExe               = Download-File $Link_Agent         "agent.exe"
 $oscZip                 = Download-File $Link_OSCPoint      "OSCPoint.zip"
+# Restore the XML Config Download
 $inputDirectorConfig    = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
 
 # --- STEP 2: SYSTEM TWEAKS ---
@@ -82,30 +85,44 @@ if (!(Get-SmbShare -Name "GFX1" -ErrorAction SilentlyContinue)) {
 }
 
 # --- STEP 3: INSTALL EASY APPS ---
+
+# Input Director + Config Import
 if ($inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
     Write-Host "Installing Input Director..." -ForegroundColor Yellow
     Start-Process -FilePath $inputDirectorInstaller -ArgumentList "/S" -Wait
-    $idCmdPath = if ([Environment]::Is64BitOperatingSystem) { "C:\Program Files\Input Director\IDCmd.exe" } else { "C:\Program Files (x86)\Input Director\IDCmd.exe" }
-    if (Test-Path $idCmdPath -and $inputDirectorConfig -and (Test-Path $inputDirectorConfig)) {
-        Start-Process -FilePath $idCmdPath -ArgumentList "-importconfig:`"$inputDirectorConfig`"" -Wait
+    
+    # Restore the Config Import Logic
+    $idCmdPath = if ([Environment]::Is64BitOperatingSystem) { "C:\Program Files (x86)\Input Director\IDCmd.exe" } else { "C:\Program Files\Input Director\IDCmd.exe" }
+    # Fallback check
+    if (!(Test-Path $idCmdPath)) { $idCmdPath = "C:\Program Files\Input Director\IDCmd.exe" }
+
+    if (Test-Path $idCmdPath) {
+        if ($inputDirectorConfig -and (Test-Path $inputDirectorConfig)) {
+            Write-Host "Importing Input Director Config..." -ForegroundColor Gray
+            Start-Process -FilePath $idCmdPath -ArgumentList "-importconfig:`"$inputDirectorConfig`"" -Wait
+            Write-Host "Input Director configured." -ForegroundColor Green
+        } else {
+            Write-Warning "Input Director Config XML not found. Skipping import."
+        }
     }
 }
+
 if ($agentExe -and (Test-Path $agentExe)) {
     $agentDest = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
     Copy-Item -Path $agentExe -Destination $agentDest -Force -ErrorAction SilentlyContinue
     Unblock-File -Path $agentDest -ErrorAction SilentlyContinue
     New-NetFirewallRule -DisplayName "GFX Agent" -Direction Inbound -Program $agentDest -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
 }
+
 if ($tallyViewerExe -and (Test-Path $tallyViewerExe)) {
     Copy-Item -Path $tallyViewerExe -Destination "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
 }
 
-# --- STEP 4: OSCPOINT INSTALLATION (Fixed) ---
+# --- STEP 4: OSCPOINT INSTALLATION ---
 if ($oscZip -and (Test-Path $oscZip)) {
     Write-Host "--- Starting OSCPoint Deployment ---" -ForegroundColor Cyan
     
     $oscDir = "C:\OSCPoint"
-    # Note: We will force the file to this name in the steps below
     $vstoPath = "C:\OSCPoint\OSCPoint.vsto"
 
     # A. Pre-Requisite Check: VSTO Runtime
@@ -125,42 +142,29 @@ if ($oscZip -and (Test-Path $oscZip)) {
     New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
     Expand-Archive -Path $oscZip -DestinationPath $oscDir -Force
     
-    # --- CRITICAL FIX: FLATTEN FOLDER & RENAME ---
-    # Find the .vsto file wherever it is (subfolder or root)
+    # C. Flatten & Rename (Critical Fix from v50)
     $foundVsto = Get-ChildItem -Path $oscDir -Filter "*.vsto" -Recurse | Select-Object -First 1
-    
     if ($foundVsto) {
-        Write-Host "Found VSTO at: $($foundVsto.FullName)" -ForegroundColor Gray
-        
-        # If it's in a subfolder, move everything up to Root C:\OSCPoint
         if ($foundVsto.Directory.FullName -ne $oscDir) {
-            Write-Host "Flattening directory structure..." -ForegroundColor Gray
             Get-ChildItem -Path $foundVsto.Directory.FullName | Move-Item -Destination $oscDir -Force
         }
-
-        # Rename the file to remove spaces (Matches $vstoPath)
         $currentPath = Join-Path $oscDir $foundVsto.Name
         if ($foundVsto.Name -ne "OSCPoint.vsto") {
-            Write-Host "Renaming to OSCPoint.vsto..." -ForegroundColor Gray
             Rename-Item -Path $currentPath -NewName "OSCPoint.vsto" -Force
         }
-    } else {
-        Write-Error "ERROR: No .vsto file found in the zip archive!"
-        # Exit this block to prevent errors downstream
-        continue 
     }
     
-    # Unblock everything now that it's in place
     Get-ChildItem -Path $oscDir -Recurse | Unblock-File
 
-    # C. Firewall Bypass (PowerPoint)
+    # D. Firewall Bypass (PowerPoint - Updated Port)
     $ppPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\powerpnt.exe" -ErrorAction SilentlyContinue)."(Default)"
     if ($ppPath) {
         Remove-NetFirewallRule -DisplayName "OSCPoint Bypass" -ErrorAction SilentlyContinue
+        # Using $LocalPort (35551)
         New-NetFirewallRule -DisplayName "OSCPoint Bypass" -Direction Inbound -Program $ppPath -Action Allow -Protocol UDP -LocalPort $LocalPort -Profile Any -ErrorAction SilentlyContinue | Out-Null
     }
 
-    # D. Trust Certificate
+    # E. Trust Certificate
     $setupPath = Join-Path $oscDir "setup.exe"
     if (Test-Path $setupPath) {
         $cert = (Get-AuthenticodeSignature $setupPath).SignerCertificate
@@ -172,7 +176,7 @@ if ($oscZip -and (Test-Path $oscZip)) {
         }
     }
 
-    # E. Ghost Watcher (Auto-Clicker)
+    # F. Ghost Watcher (Auto-Clicker)
     $GhostScript = {
         Add-Type -AssemblyName System.Windows.Forms
         $title = "Microsoft Office Customization Installer"
@@ -198,23 +202,23 @@ if ($oscZip -and (Test-Path $oscZip)) {
     }
     Start-Process powershell -ArgumentList "-NoProfile -WindowStyle Hidden -Command $GhostScript"
 
-    # F. Trigger Installer
+    # G. Trigger Installer
     $vstoInstallerPath = "C:\Program Files\Common Files\microsoft shared\VSTO\10.0\VSTOInstaller.exe"
     if (!(Test-Path $vstoInstallerPath)) { $vstoInstallerPath = "C:\Program Files (x86)\Common Files\microsoft shared\VSTO\10.0\VSTOInstaller.exe" }
     
     if (Test-Path $vstoInstallerPath) {
-        # Using the now guaranteed path: C:\OSCPoint\OSCPoint.vsto
         Start-Process $vstoInstallerPath -ArgumentList "/i ""$vstoPath""" -PassThru | Out-Null
         Start-Sleep -Seconds 15
         Get-Process "VSTOInstaller" -ErrorAction SilentlyContinue | Stop-Process -Force
     }
 
-    # G. Config
+    # H. OSC Config (Updated Ports)
+    Write-Host "Configuring OSCPoint Registry..." -ForegroundColor Gray
     $oscConfig = "HKCU:\Software\Zinc Event Production Ltd\OSCPoint"
     if (!(Test-Path $oscConfig)) { New-Item -Path $oscConfig -Force | Out-Null }
     Set-ItemProperty -Path $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
-    Set-ItemProperty -Path $oscConfig -Name "RemotePort" -Value $RemotePort
-    Set-ItemProperty -Path $oscConfig -Name "LocalPort" -Value $LocalPort
+    Set-ItemProperty -Path $oscConfig -Name "RemotePort" -Value $RemotePort # 35550
+    Set-ItemProperty -Path $oscConfig -Name "LocalPort" -Value $LocalPort   # 35551
     Set-ItemProperty -Path $oscConfig -Name "FeedbackEnabled" -Value "True"
 }
 
