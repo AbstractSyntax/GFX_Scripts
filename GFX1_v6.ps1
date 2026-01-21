@@ -1,4 +1,4 @@
-# v26 - Force-Loading Unsigned VSTO
+# v27 - OSCPoint Deployment with Fixed VSTO Runtime Installer
 # Run as Administrator
 
 # --- 1. CONFIGURATION ---
@@ -9,43 +9,50 @@ $oscDir         = "C:\OSCPoint"
 $vstoName       = "OSCPoint add-in.vsto"
 $TempDir        = "C:\GFX_Temp_Setup"
 
+# Core Links
 $Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
-$Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.build173.Domain.Setup.ex1e"
-$Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/TallyViewer.ex1e"
-$Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe1"
+$Link_VSTO_Runtime  = "https://aka.ms/vstort40vix64" # Official Microsoft Redirector for VSTO Runtime
 
-Write-Host "--- Starting OSCPoint Deployment v26 ---" -ForegroundColor Cyan
+Write-Host "--- Starting OSCPoint Deployment v27 ---" -ForegroundColor Cyan
 
-# --- 2. VSTO RUNTIME CHECK ---
-$vstoInstalled = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\VSTO\Runtime\Wf\4.0 -ErrorAction SilentlyContinue
-if (!$vstoInstalled) {
-    Write-Warning "VSTO Runtime not detected. Attempting to download and install..."
-    $vstoUrl = "https://download.microsoft.com/download/1/D/0/1D061D41-51A2-4ADF-A386-327D0BA50640/vstor_redist.exe"
-    Invoke-WebRequest $vstoUrl -OutFile "$TempDir\vstor_redist.exe"
-    Start-Process "$TempDir\vstor_redist.exe" -ArgumentList "/q /norestart" -Wait
+# --- 2. PREPARATION ---
+if (!(Test-Path $TempDir)) { New-Item $TempDir -ItemType Directory -Force | Out-Null }
+Get-Process "powerpnt" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# --- 3. VSTO RUNTIME INSTALLER (Critical Fix) ---
+# Check if VSTO is actually installed in the Registry
+$vstoCheck = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\VSTO\Runtime\Wf\4.0" -ErrorAction SilentlyContinue
+if (!$vstoCheck) {
+    Write-Host "[Required] VSTO Runtime not found. Downloading..." -ForegroundColor Yellow
+    $vstoExe = Join-Path $TempDir "vstor_redist.exe"
+    try {
+        Invoke-WebRequest -Uri $Link_VSTO_Runtime -OutFile $vstoExe -UseBasicParsing
+        Write-Host "[Required] Installing VSTO Runtime (Silent)..." -ForegroundColor Yellow
+        Start-Process $vstoExe -ArgumentList "/q /norestart" -Wait
+        Write-Host "VSTO Runtime installed successfully." -ForegroundColor Green
+    } catch {
+        Write-Error "Could not download VSTO Runtime. The add-in will NOT load without it."
+        exit
+    }
 }
 
-# --- 3. PREPARATION ---
-Get-Process "powerpnt" -ErrorAction SilentlyContinue | Stop-Process -Force
+# --- 4. DOWNLOAD & EXTRACT ADD-IN ---
+Write-Host "[Task] Downloading OSCPoint..." -ForegroundColor Gray
 if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force }
 New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
 
-# --- 4. DOWNLOAD & EXTRACT ---
-Invoke-WebRequest -Uri $Link_OSCPoint -OutFile "$TempDir\OSCPoint.zip" -UseBasicParsing
-Expand-Archive -Path "$TempDir\OSCPoint.zip" -DestinationPath $oscDir -Force
+$zipPath = Join-Path $TempDir "OSCPoint.zip"
+Invoke-WebRequest -Uri $Link_OSCPoint -OutFile $zipPath -UseBasicParsing
+Expand-Archive -Path $zipPath -DestinationPath $oscDir -Force
 Get-ChildItem -Path $oscDir -Recurse | Unblock-File
 
 $vstoFile = Get-ChildItem -Path $oscDir -Filter "$vstoName" -Recurse | Select-Object -First 1
 if ($vstoFile) {
     $vstoPath = $vstoFile.FullName
-    Write-Host "Registering: $vstoPath" -ForegroundColor Gray
+    Write-Host "Found VSTO at: $vstoPath" -ForegroundColor Gray
 
-    # --- 5. THE "SILENT ERROR" KILLER ---
-    # This forces PowerPoint to show you an error popup if the add-in fails to load
-    [Environment]::SetEnvironmentVariable("VSTO_SUPPRESSDISPLAYALERTS", "0", "Machine")
-    [Environment]::SetEnvironmentVariable("VSTO_LOGALERTS", "1", "Machine")
-
-    # --- 6. TRUST MANAGER BYPASS (For Unsigned) ---
+    # --- 5. THE SECURITY BYPASS (Unsigned Code) ---
+    # Force .NET to allow unsigned VSTO files from the local computer
     $trustPaths = @(
         "HKLM:\SOFTWARE\MICROSOFT\.NETFramework\Security\TrustManager\PromptingLevel",
         "HKLM:\SOFTWARE\WOW6432Node\MICROSOFT\.NETFramework\Security\TrustManager\PromptingLevel"
@@ -54,26 +61,22 @@ if ($vstoFile) {
         if (!(Test-Path $tp)) { New-Item -Path $tp -Force | Out-Null }
         Set-ItemProperty $tp -Name "MyComputer" -Value "Enabled"
         Set-ItemProperty $tp -Name "LocalIntranet" -Value "Enabled"
-        Set-ItemProperty $tp -Name "Internet" -Value "Enabled"
-        Set-ItemProperty $tp -Name "TrustedSites" -Value "Enabled"
     }
 
-    # --- 7. OFFICE RESILIENCY CLEANUP ---
+    # --- 6. OFFICE RESILIENCY & TRUSTED LOCATIONS ---
     foreach ($ver in @("14.0", "15.0", "16.0")) {
         $regBase = "HKCU:\Software\Microsoft\Office\$ver\PowerPoint"
-        # Force Reset of disabled list
+        # Reset Blacklists
         Remove-Item "$regBase\Resiliency\DisabledItems" -Recurse -ErrorAction SilentlyContinue
         Remove-Item "$regBase\Resiliency\CrashingAddins" -Recurse -ErrorAction SilentlyContinue
-        
-        # Add Trusted Location
+        # Set Trusted Location
         $trustPath = "$regBase\Security\Trusted Locations\OSCPoint"
         if (!(Test-Path $trustPath)) { New-Item $trustPath -Force | Out-Null }
         Set-ItemProperty $trustPath -Name "Path" -Value $oscDir
         Set-ItemProperty $trustPath -Name "AllowSubfolders" -Value 1 -Type DWord
     }
 
-    # --- 8. MANIFEST REGISTRATION ---
-    # Register in both HKCU and HKLM to ensure visibility
+    # --- 7. REGISTRATION ---
     $regPaths = @(
         "HKCU:\Software\Microsoft\Office\PowerPoint\Addins\OSCPoint",
         "HKLM:\SOFTWARE\Microsoft\Office\PowerPoint\Addins\OSCPoint",
@@ -86,7 +89,7 @@ if ($vstoFile) {
         Set-ItemProperty $rp -Name "FriendlyName" -Value "OSCPoint"
     }
 
-    # --- 9. OSC APP CONFIG ---
+    # --- 8. OSC CONFIGURATION ---
     $oscConfig = "HKCU:\Software\Zinc Event Production Ltd\OSCPoint"
     if (!(Test-Path $oscConfig)) { New-Item $oscConfig -Force | Out-Null }
     Set-ItemProperty $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
@@ -95,14 +98,13 @@ if ($vstoFile) {
     Set-ItemProperty $oscConfig -Name "FeedbackEnabled" -Value "True"
 }
 
-# --- 10. FIREWALL & SUPPORT APPS ---
+# --- 9. FIREWALL ---
 Remove-NetFirewallRule -DisplayName "OSCPoint Inbound" -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "OSCPoint Inbound" -Direction Inbound -Action Allow -Protocol UDP -LocalPort $LocalPort | Out-Null
 
-# Quick Download/Install for Support Apps
-Download-File $Link_Agent "agent.exe"
-Download-File $Link_TallyViewer "TallyViewer.exe"
-Download-File $Link_InputDirector "IDSetup.exe"
-
-Write-Host "--- DEPLOYMENT COMPLETE ---" -ForegroundColor Green
-Write-Host "Please open PowerPoint. If it fails, a popup should now appear explaining why." -ForegroundColor Yellow
+# --- 10. CLEANUP ---
+Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host "----------------------------------------------" -ForegroundColor Cyan
+Write-Host "DEPLOYMENT COMPLETE" -ForegroundColor Green
+Write-Host "If the plugin still doesn't appear, please RESTART your PC." -ForegroundColor Yellow
+Write-Host "----------------------------------------------" -ForegroundColor Cyan
