@@ -191,4 +191,4 @@ if ($agentExe -and (Test-Path $agentExe)) {
 Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Setup Complete. Restarting..." -ForegroundColor Yellow
-Restart-Computer -Force
+#Restart-Computer -Force
