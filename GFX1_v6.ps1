@@ -20,7 +20,7 @@ $TempDir = "$env:TEMP\GFXSetup"
 if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
-Write-Host "--- Starting GFX Cloud Setup v46 ---" -ForegroundColor Cyan
+Write-Host "--- Starting GFX Cloud Setup v6 ---" -ForegroundColor Cyan
 
 # --- HELPER FUNCTIONS ---
 function Download-File {
