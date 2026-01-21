@@ -86,6 +86,7 @@ Set-Item -Path $clsidPath -Value ""
 
 # 7. Display Settings
 Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "LogPixels" -Value 96
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "Win8DpiScaling" -Value 1
 
 # --- INSTALLATION ---
 
