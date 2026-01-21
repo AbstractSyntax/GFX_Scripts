@@ -21,10 +21,22 @@ function Download-File {
     param ($Url, $FileName)
     $Dest = "$TempDir\$FileName"
     try {
-        Write-Host "Downloading $FileName..." -ForegroundColor Gray
-        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
-    } catch { return $null }
-    return $Dest
+        Write-Host "DEBUG: Attempting to download $FileName from $Url" -ForegroundColor Gray
+        # Using -MaximumRedirection to ensure we follow GitHub's download paths
+        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -MaximumRedirection 5
+        
+        if (Test-Path $Dest) {
+            $fSize = (Get-Item $Dest).Length / 1KB
+            Write-Host "DEBUG: $FileName downloaded. Size: {0:N2} KB" -f $fSize -ForegroundColor Green
+            return $Dest
+        } else {
+            Write-Host "DEBUG: $FileName download failed - File not found on disk." -ForegroundColor Red
+            return $null
+        }
+    } catch {
+        Write-Host "DEBUG: Exception downloading $FileName : $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
 }
 
 # --- Download Phase ---
