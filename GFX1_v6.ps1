@@ -22,12 +22,13 @@ function Download-File {
     $Dest = "$TempDir\$FileName"
     try {
         Write-Host "DEBUG: Attempting to download $FileName from $Url" -ForegroundColor Gray
-        # Using -MaximumRedirection to ensure we follow GitHub's download paths
-        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -MaximumRedirection 5
+        # We wrap the formatting in parentheses so PowerShell doesn't confuse -f with ForegroundColor
+        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
         
         if (Test-Path $Dest) {
             $fSize = (Get-Item $Dest).Length / 1KB
-            Write-Host "DEBUG: $FileName downloaded. Size: {0:N2} KB" -f $fSize -ForegroundColor Green
+            $msg = "DEBUG: $FileName downloaded. Size: {0:N2} KB" -f $fSize
+            Write-Host $msg -ForegroundColor Green
             return $Dest
         } else {
             Write-Host "DEBUG: $FileName download failed - File not found on disk." -ForegroundColor Red
