@@ -187,6 +187,8 @@ if ($agentExe -and (Test-Path $agentExe)) {
     Write-Host "Agent.exe set to autostart and trusted." -ForegroundColor Green
 }
 
+Read-Host -Prompt "Press Enter to continue"
+
 # Cleanup
 Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 
