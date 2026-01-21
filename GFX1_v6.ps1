@@ -5,9 +5,9 @@
 $RepoRawUrl = "https://raw.githubusercontent.com/AbstractSyntax/GFX_Scripts/main"
 
 # Download Links
-$Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/rele1ase/InputDirector.v2.3.build173.Domain.Setup.exe"
-$Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/rele1ase/TallyViewer.exe"
-$Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/relea1se/agent.exe"
+$Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.build173.Domain.Setup.exe"
+$Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/TallyViewer.exe"
+$Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe"
 $Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
 $Link_VSTO_Runtime  = "https://go.microsoft.com/fwlink/?LinkId=158918" 
 
@@ -225,4 +225,4 @@ Write-Host "Setup Finished. Restarting in 5 Seconds..." -ForegroundColor Green
 Write-Host "---------------------------------------------------" -ForegroundColor Cyan
 
 Start-Sleep -Seconds 5
-#Restart-Computer -Force
+Restart-Computer -Force
