@@ -1,4 +1,4 @@
-#v7 Hybrid Version (Added OSCPoint Auto-Install & Config)
+#v6 Hybrid Version (Added OSCPoint Auto-Install & Config)
 
 # --- CONFIGURATION START ---
 
@@ -8,8 +8,7 @@ $RepoRawUrl = "https://raw.githubusercontent.com/AbstractSyntax/GFX_Scripts/main
 $Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.build173.Domain.Setup.exe"
 $Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/TallyViewer.exe"
 $Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe"
-# ADDED: Link to your OSCPoint ZIP
-$Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/OSCPoint.zip"
+$Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
 
 # --- CONFIGURATION END ---
 
