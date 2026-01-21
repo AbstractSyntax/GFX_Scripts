@@ -1,4 +1,4 @@
-# v19 Final Hybrid - VSTO Inclusion List Injection
+# v20 Final Hybrid - Direct Injection (Zero Installer Prompts)
 # Run as Administrator
 
 # --- CONFIGURATION ---
@@ -27,7 +27,7 @@ function Download-File {
     } catch { return $null }
 }
 
-Write-Host "--- Starting Setup v19 ---" -ForegroundColor Cyan
+Write-Host "--- Starting Setup v20 ---" -ForegroundColor Cyan
 
 # Downloads
 $oscZip = Download-File $Link_OSCPoint "OSCPoint.zip"
@@ -37,7 +37,7 @@ $agentExe = Download-File $Link_Agent "agent.exe"
 
 # --- OSCPOINT STAGE ---
 if ($oscZip) {
-    Write-Host "[OSCPoint Stage]" -ForegroundColor Cyan
+    Write-Host "[OSCPoint Stage] Direct Injecting Add-in..." -ForegroundColor Cyan
     if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force }
     New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
     Expand-Archive -Path $oscZip -DestinationPath $oscDir -Force
@@ -47,49 +47,44 @@ if ($oscZip) {
 
     if ($vstoFile) {
         $vstoPath = $vstoFile.FullName
+        # Manifest URL for Registry
         $manifestUrl = "file:///$($vstoPath.Replace('\','/'))"
         
-        # 1. TRUST CERTIFICATE & EXTRACT PUBLIC KEY
+        # 1. TRUST CERTIFICATE 
         $cert = (Get-AuthenticodeSignature $vstoPath).SignerCertificate
         if ($cert) {
-            # Add to Trusted Stores
             foreach ($s in @("Root", "TrustedPublisher")) {
                 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($s, "LocalMachine")
                 $store.Open("ReadWrite"); $store.Add($cert); $store.Close()
             }
 
-            # INJECT INTO VSTO INCLUSION LIST (Bypasses the "Are you sure?" prompt)
-            Write-Host "Whitelisting Application in Inclusion List..." -ForegroundColor Gray
+            # 2. INJECT INTO VSTO INCLUSION LIST
+            # This is the "Secret Sauce" that bypasses the prompt you saw.
+            Write-Host "Bypassing Security Prompts..." -ForegroundColor Gray
             $pubKey = [System.Convert]::ToBase64String($cert.GetPublicKey())
             $rsaKey = "<RSAKeyValue><Modulus>$pubKey</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>"
-            
-            # Create a unique ID for the Inclusion entry
-            $inclusionID = [guid]::NewGuid().ToString().ToUpper()
-            $inclusionPath = "HKCU:\Software\Microsoft\VSTO\Security\Inclusion\{$inclusionID}"
+            $inclusionPath = "HKCU:\Software\Microsoft\VSTO\Security\Inclusion\{12457852-1452-4852-8547-124578521456}" # Constant GUID
             if (!(Test-Path $inclusionPath)) { New-Item $inclusionPath -Force | Out-Null }
-            Set-ItemProperty $inclusionPath -Name "Url" -Value $manifestUrl
+            Set-ItemProperty $inclusionPath -Name "Url" -Value "$manifestUrl"
             Set-ItemProperty $inclusionPath -Name "PublicKey" -Value $rsaKey
         }
 
-        # 2. RUN SETUP.EXE SILENTLY
-        $setupExe = Join-Path $oscDir "setup.exe"
-        if (Test-Path $setupExe) {
-            Write-Host "Running Setup.exe silently..." -ForegroundColor Yellow
-            Start-Process $setupExe -ArgumentList "/s /v`"/qn`"" -Wait
-        }
-
-        # 3. CONFIGURE ADD-IN REGISTRY (Force Load)
+        # 3. REGISTER ADD-IN MANUALLY (Skipping setup.exe to avoid prompts)
+        Write-Host "Registering Add-in for PowerPoint..." -ForegroundColor Gray
         $regPaths = @(
             "HKCU:\Software\Microsoft\Office\PowerPoint\Addins\OSCPoint",
             "HKLM:\SOFTWARE\Microsoft\Office\PowerPoint\Addins\OSCPoint"
         )
         foreach ($rp in $regPaths) {
             if (!(Test-Path $rp)) { New-Item $rp -Force | Out-Null }
-            Set-ItemProperty $rp -Name "Manifest" -Value "$manifestUrl|vstolocal"
+            Set-ItemProperty $rp -Name "Manifest" -Value "$($manifestUrl)|vstolocal"
             Set-ItemProperty $rp -Name "LoadBehavior" -Value 3 -Type DWord
+            Set-ItemProperty $rp -Name "Description" -Value "OSC Feedback for PowerPoint"
+            Set-ItemProperty $rp -Name "FriendlyName" -Value "OSCPoint"
         }
 
         # 4. CONFIGURE OSC FEEDBACK (IP & Toggle)
+        Write-Host "Configuring Feedback to 192.168.8.142..." -ForegroundColor Gray
         $oscConfig = "HKCU:\Software\Zinc Event Production Ltd\OSCPoint"
         if (!(Test-Path $oscConfig)) { New-Item $oscConfig -Force | Out-Null }
         Set-ItemProperty $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
@@ -97,7 +92,7 @@ if ($oscZip) {
         Set-ItemProperty $oscConfig -Name "RemotePort" -Value 9000
         Set-ItemProperty $oscConfig -Name "LocalPort" -Value 8000
         
-        Write-Host "OSCPoint Fully Installed and Whitelisted." -ForegroundColor Green
+        Write-Host "OSCPoint Successfully Injected." -ForegroundColor Green
     }
 }
 
@@ -105,7 +100,6 @@ if ($oscZip) {
 if ($agentExe) {
     $dest = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
     Copy-Item $agentExe $dest -Force -ErrorAction SilentlyContinue
-    Unblock-File $dest -ErrorAction SilentlyContinue
 }
 
 if ($tallyExe) {
@@ -113,6 +107,7 @@ if ($tallyExe) {
 }
 
 if ($idInstaller) {
+    Write-Host "Installing Input Director..." -ForegroundColor Yellow
     Start-Process $idInstaller -ArgumentList "/S" -Wait
 }
 
