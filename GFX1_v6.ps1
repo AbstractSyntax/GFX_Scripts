@@ -1,110 +1,221 @@
-# v27 - OSCPoint Deployment with Fixed VSTO Runtime Installer
+# v6 - GFX Cloud Setup (The "Complete" Merger)
+# Integrates: oscpoint complete unattended install, plus firewall rules
 # Run as Administrator
 
-# --- 1. CONFIGURATION ---
-$OSCTargetIP    = "192.168.8.142"
-$RemotePort     = 9000
-$LocalPort      = 8000
-$oscDir         = "C:\OSCPoint"
-$vstoName       = "OSCPoint add-in.vsto"
-$TempDir        = "C:\GFX_Temp_Setup"
+# --- CONFIGURATION START ---
+$RepoRawUrl = "https://raw.githubusercontent.com/AbstractSyntax/GFX_Scripts/main"
 
-# Core Links
+# Download Links
+$Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.build173.Domain.Setup.exe"
+$Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/TallyViewer.exe"
+$Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe"
 $Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
-$Link_VSTO_Runtime  = "https://aka.ms/vstort40vix64" # Official Microsoft Redirector for VSTO Runtime
 
-Write-Host "--- Starting OSCPoint Deployment v27 ---" -ForegroundColor Cyan
+$OSCTargetIP = "192.168.8.142"
+$LocalPort   = 8000
+$RemotePort  = 9000
+# --- CONFIGURATION END ---
 
-# --- 2. PREPARATION ---
-if (!(Test-Path $TempDir)) { New-Item $TempDir -ItemType Directory -Force | Out-Null }
-Get-Process "powerpnt" -ErrorAction SilentlyContinue | Stop-Process -Force
+$TempDir = "$env:TEMP\GFXSetup"
+if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
+New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
-# --- 3. VSTO RUNTIME INSTALLER (Critical Fix) ---
-# Check if VSTO is actually installed in the Registry
-$vstoCheck = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\VSTO\Runtime\Wf\4.0" -ErrorAction SilentlyContinue
-if (!$vstoCheck) {
-    Write-Host "[Required] VSTO Runtime not found. Downloading..." -ForegroundColor Yellow
-    $vstoExe = Join-Path $TempDir "vstor_redist.exe"
+Write-Host "--- Starting GFX Cloud Setup v46 ---" -ForegroundColor Cyan
+
+# --- HELPER FUNCTIONS ---
+function Download-File {
+    param ($Url, $FileName)
+    $Dest = "$TempDir\$FileName"
     try {
-        Invoke-WebRequest -Uri $Link_VSTO_Runtime -OutFile $vstoExe -UseBasicParsing
-        Write-Host "[Required] Installing VSTO Runtime (Silent)..." -ForegroundColor Yellow
-        Start-Process $vstoExe -ArgumentList "/q /norestart" -Wait
-        Write-Host "VSTO Runtime installed successfully." -ForegroundColor Green
-    } catch {
-        Write-Error "Could not download VSTO Runtime. The add-in will NOT load without it."
-        exit
+        Write-Host "Downloading $FileName..." -ForegroundColor Gray
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
+    } catch { 
+        Write-Warning "Failed to download $FileName"
+        return $null 
     }
+    return $Dest
 }
 
-# --- 4. DOWNLOAD & EXTRACT ADD-IN ---
-Write-Host "[Task] Downloading OSCPoint..." -ForegroundColor Gray
-if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force }
-New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
+# --- DOWNLOAD PHASE ---
+$inputDirectorInstaller = Download-File $Link_InputDirector "InputDirectorSetup.exe"
+$tallyViewerExe         = Download-File $Link_TallyViewer   "TallyViewer.exe"
+$agentExe               = Download-File $Link_Agent         "agent.exe"
+$oscZip                 = Download-File $Link_OSCPoint      "OSCPoint.zip"
+$inputDirectorConfig    = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
 
-$zipPath = Join-Path $TempDir "OSCPoint.zip"
-Invoke-WebRequest -Uri $Link_OSCPoint -OutFile $zipPath -UseBasicParsing
-Expand-Archive -Path $zipPath -DestinationPath $oscDir -Force
-Get-ChildItem -Path $oscDir -Recurse | Unblock-File
+# --- SYSTEM CONFIGURATION (Restored from v6) ---
+Write-Host "Configuring System Services & Registry..." -ForegroundColor Gray
 
-$vstoFile = Get-ChildItem -Path $oscDir -Filter "$vstoName" -Recurse | Select-Object -First 1
-if ($vstoFile) {
-    $vstoPath = $vstoFile.FullName
-    Write-Host "Found VSTO at: $vstoPath" -ForegroundColor Gray
+# 1. Services
+$Services = @("LanmanServer", "fdPHost")
+foreach ($Svc in $Services) {
+    Set-Service -Name $Svc -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name $Svc -ErrorAction SilentlyContinue
+}
 
-    # --- 5. THE SECURITY BYPASS (Unsigned Code) ---
-    # Force .NET to allow unsigned VSTO files from the local computer
-    $trustPaths = @(
-        "HKLM:\SOFTWARE\MICROSOFT\.NETFramework\Security\TrustManager\PromptingLevel",
-        "HKLM:\SOFTWARE\WOW6432Node\MICROSOFT\.NETFramework\Security\TrustManager\PromptingLevel"
-    )
-    foreach ($tp in $trustPaths) {
-        if (!(Test-Path $tp)) { New-Item -Path $tp -Force | Out-Null }
-        Set-ItemProperty $tp -Name "MyComputer" -Value "Enabled"
-        Set-ItemProperty $tp -Name "LocalIntranet" -Value "Enabled"
+# 2. Hostname
+if ((Get-ComputerInfo).WindowsProductName -notlike "*GFX1*") { 
+    Write-Host "Renaming Computer to GFX1..." -ForegroundColor Yellow
+    Rename-Computer -NewName "GFX1" -Force -ErrorAction SilentlyContinue 
+}
+
+# 3. NTLM & SMB (Critical Legacy Support from v6)
+Set-SmbServerConfiguration -EnableSMB2Protocol $true -Force -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Lsa" -Name "LMCompatibilityLevel" -Value 1 -ErrorAction SilentlyContinue
+
+# 4. Insecure Guest Auth (Policies AND Services)
+$regPathPol = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation"
+$regPathSvc = "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
+if (!(Test-Path $regPathPol)) { New-Item -Path $regPathPol -Force | Out-Null }
+Set-ItemProperty -Path $regPathPol -Name "AllowInsecureGuestAuth" -Value 1 -Type DWord
+if (!(Test-Path $regPathSvc)) { New-Item -Path $regPathSvc -Force | Out-Null }
+Set-ItemProperty -Path $regPathSvc -Name "AllowInsecureGuestAuth" -Value 1 -Type DWord
+
+# 5. Refresh Network Stack
+cmd /c "sc stop lanmanworkstation > nul 2>&1"
+cmd /c "sc start lanmanworkstation > nul 2>&1"
+
+# 6. Windows UI Tweaks (From v6)
+Write-Host "Applying Windows UI Fixes..." -ForegroundColor Gray
+# Taskbar Left Align (Win 11)
+$explorerAdvPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+if (Test-Path $explorerAdvPath) { Set-ItemProperty -Path $explorerAdvPath -Name "TaskbarAl" -Value 0 -Type DWord }
+# Restore Classic Context Menu (Win 11)
+$clsidPath = "HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
+if (!(Test-Path $clsidPath)) { New-Item -Path $clsidPath -Force | Out-Null }
+Set-Item -Path $clsidPath -Value ""
+# DPI Scaling
+Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "LogPixels" -Value 96
+
+# 7. Firewall & Sharing (From v6)
+Write-Host "Configuring Sharing & Firewall..." -ForegroundColor Gray
+Set-NetFirewallRule -DisplayGroup "Network Discovery" -Enabled True -ErrorAction SilentlyContinue
+Set-NetFirewallRule -DisplayGroup "File and Printer Sharing" -Enabled True -ErrorAction SilentlyContinue
+
+$sharedFolderPath = "$env:USERPROFILE\Desktop\GFX1"
+if (!(Test-Path $sharedFolderPath)) { New-Item -ItemType Directory -Path $sharedFolderPath -Force | Out-Null }
+if (!(Get-SmbShare -Name "GFX1" -ErrorAction SilentlyContinue)) { 
+    New-SmbShare -Name "GFX1" -Path $sharedFolderPath -FullAccess "Everyone" -ErrorAction SilentlyContinue 
+}
+
+# --- OSCPOINT INSTALLATION (The "Timed Executioner") ---
+if ($oscZip -and (Test-Path $oscZip)) {
+    Write-Host "--- Starting OSCPoint Deployment ---" -ForegroundColor Cyan
+    
+    $oscDir = "C:\OSCPoint"
+    $vstoPath = "C:\OSCPoint\OSCPoint.vsto"
+
+    # Clean & Extract
+    Get-Process "powerpnt", "VSTOInstaller" -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
+    Expand-Archive -Path $oscZip -DestinationPath $oscDir -Force
+    Get-ChildItem -Path $oscDir -Recurse | Unblock-File
+
+    # Firewall Bypass (PowerPoint Binary)
+    Write-Host "[1/5] Setting Firewall Rules for PowerPoint..." -ForegroundColor Gray
+    $ppPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\powerpnt.exe" -ErrorAction SilentlyContinue)."(Default)"
+    if ($ppPath) {
+        Remove-NetFirewallRule -DisplayName "OSCPoint Bypass" -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName "OSCPoint Bypass" -Direction Inbound -Program $ppPath -Action Allow -Protocol UDP -LocalPort $LocalPort -Profile Any -ErrorAction SilentlyContinue | Out-Null
     }
 
-    # --- 6. OFFICE RESILIENCY & TRUSTED LOCATIONS ---
-    foreach ($ver in @("14.0", "15.0", "16.0")) {
-        $regBase = "HKCU:\Software\Microsoft\Office\$ver\PowerPoint"
-        # Reset Blacklists
-        Remove-Item "$regBase\Resiliency\DisabledItems" -Recurse -ErrorAction SilentlyContinue
-        Remove-Item "$regBase\Resiliency\CrashingAddins" -Recurse -ErrorAction SilentlyContinue
-        # Set Trusted Location
-        $trustPath = "$regBase\Security\Trusted Locations\OSCPoint"
-        if (!(Test-Path $trustPath)) { New-Item $trustPath -Force | Out-Null }
-        Set-ItemProperty $trustPath -Name "Path" -Value $oscDir
-        Set-ItemProperty $trustPath -Name "AllowSubfolders" -Value 1 -Type DWord
+    # Trust Certificate
+    Write-Host "[2/5] Trusting OctoCue Certificate..." -ForegroundColor Gray
+    $setupPath = Join-Path $oscDir "setup.exe"
+    if (Test-Path $setupPath) {
+        $cert = (Get-AuthenticodeSignature $setupPath).SignerCertificate
+        if ($cert) {
+            foreach ($s in @("Root", "TrustedPublisher")) {
+                $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($s, "LocalMachine")
+                $store.Open("ReadWrite"); $store.Add($cert); $store.Close()
+            }
+        }
     }
 
-    # --- 7. REGISTRATION ---
-    $regPaths = @(
-        "HKCU:\Software\Microsoft\Office\PowerPoint\Addins\OSCPoint",
-        "HKLM:\SOFTWARE\Microsoft\Office\PowerPoint\Addins\OSCPoint",
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office\PowerPoint\Addins\OSCPoint"
-    )
-    foreach ($rp in $regPaths) {
-        if (!(Test-Path $rp)) { New-Item $rp -Force | Out-Null }
-        Set-ItemProperty $rp -Name "Manifest" -Value "$vstoPath|vstolocal"
-        Set-ItemProperty $rp -Name "LoadBehavior" -Value 3 -Type DWord
-        Set-ItemProperty $rp -Name "FriendlyName" -Value "OSCPoint"
+    # Ghost Watcher (Auto-Clicker)
+    Write-Host "[3/5] Launching Ghost Installer Watcher..." -ForegroundColor Yellow
+    $GhostScript = {
+        Add-Type -AssemblyName System.Windows.Forms
+        $title = "Microsoft Office Customization Installer"
+        
+        Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class User32 {
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+          }
+"@
+        $start = Get-Date
+        while (((Get-Date) - $start).TotalSeconds -lt 15) {
+            $hwnd = [User32]::FindWindow($null, $title)
+            if ($hwnd -ne [IntPtr]::Zero) {
+                [User32]::SetForegroundWindow($hwnd)
+                Start-Sleep -Milliseconds 500
+                [System.Windows.Forms.SendKeys]::SendWait("%i") # Alt+I
+                return
+            }
+            Start-Sleep -Seconds 1
+        }
+    }
+    Start-Process powershell -ArgumentList "-NoProfile -WindowStyle Hidden -Command $GhostScript"
+
+    # Trigger Installer & Executioner
+    Write-Host "[4/5] Triggering Installer (Auto-kill in 15s)..." -ForegroundColor Gray
+    $vstoInstallerPath = "C:\Program Files\Common Files\microsoft shared\VSTO\10.0\VSTOInstaller.exe"
+    if (!(Test-Path $vstoInstallerPath)) { $vstoInstallerPath = "C:\Program Files (x86)\Common Files\microsoft shared\VSTO\10.0\VSTOInstaller.exe" }
+    
+    if (Test-Path $vstoInstallerPath) {
+        Start-Process $vstoInstallerPath -ArgumentList "/i ""$vstoPath""" -PassThru | Out-Null
+        Start-Sleep -Seconds 15
+        Get-Process "VSTOInstaller" -ErrorAction SilentlyContinue | Stop-Process -Force
     }
 
-    # --- 8. OSC CONFIGURATION ---
+    # OSC Config
+    Write-Host "[5/5] Configuring Registry..." -ForegroundColor Gray
     $oscConfig = "HKCU:\Software\Zinc Event Production Ltd\OSCPoint"
-    if (!(Test-Path $oscConfig)) { New-Item $oscConfig -Force | Out-Null }
-    Set-ItemProperty $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
-    Set-ItemProperty $oscConfig -Name "RemotePort" -Value $RemotePort
-    Set-ItemProperty $oscConfig -Name "LocalPort" -Value $LocalPort
-    Set-ItemProperty $oscConfig -Name "FeedbackEnabled" -Value "True"
+    if (!(Test-Path $oscConfig)) { New-Item -Path $oscConfig -Force | Out-Null }
+    Set-ItemProperty -Path $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
+    Set-ItemProperty -Path $oscConfig -Name "RemotePort" -Value $RemotePort
+    Set-ItemProperty -Path $oscConfig -Name "LocalPort" -Value $LocalPort
+    Set-ItemProperty -Path $oscConfig -Name "FeedbackEnabled" -Value "True"
+
+    Write-Host "OSCPoint Deployment Complete." -ForegroundColor Green
 }
 
-# --- 9. FIREWALL ---
-Remove-NetFirewallRule -DisplayName "OSCPoint Inbound" -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "OSCPoint Inbound" -Direction Inbound -Action Allow -Protocol UDP -LocalPort $LocalPort | Out-Null
+# --- OTHER APPS ---
 
-# --- 10. CLEANUP ---
-Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "----------------------------------------------" -ForegroundColor Cyan
-Write-Host "DEPLOYMENT COMPLETE" -ForegroundColor Green
-Write-Host "If the plugin still doesn't appear, please RESTART your PC." -ForegroundColor Yellow
-Write-Host "----------------------------------------------" -ForegroundColor Cyan
+if ($inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
+    Write-Host "Installing Input Director..." -ForegroundColor Yellow
+    Start-Process -FilePath $inputDirectorInstaller -ArgumentList "/S" -Wait
+    
+    # Smarter Path Detection (From v6)
+    $idCmdPath = if ([Environment]::Is64BitOperatingSystem) { "C:\Program Files\Input Director\IDCmd.exe" } else { "C:\Program Files (x86)\Input Director\IDCmd.exe" }
+    
+    if (Test-Path $idCmdPath -and $inputDirectorConfig -and (Test-Path $inputDirectorConfig)) {
+        Start-Process -FilePath $idCmdPath -ArgumentList "-importconfig:`"$inputDirectorConfig`"" -Wait
+        Write-Host "Input Director Config Imported." -ForegroundColor Green
+    }
+}
+
+if ($agentExe -and (Test-Path $agentExe)) {
+    $agentDest = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
+    Copy-Item -Path $agentExe -Destination $agentDest -Force -ErrorAction SilentlyContinue
+    Unblock-File -Path $agentDest -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "GFX Agent" -Direction Inbound -Program $agentDest -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+}
+
+if ($tallyViewerExe -and (Test-Path $tallyViewerExe)) {
+    Copy-Item -Path $tallyViewerExe -Destination "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
+}
+
+# --- CLEANUP & EXIT ---
+Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host "---------------------------------------------------" -ForegroundColor Cyan
+Write-Host "Setup Finished. Restarting in 5 Seconds..." -ForegroundColor Green
+Write-Host "---------------------------------------------------" -ForegroundColor Cyan
+
+Start-Sleep -Seconds 5
+Restart-Computer -Force
