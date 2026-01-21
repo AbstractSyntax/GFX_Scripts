@@ -1,7 +1,7 @@
-# v14 Final Hybrid - Syntax & Install Fix
+# v15 Final Hybrid - Deep Debugging Edition
 # Run as Administrator
 
-# --- CONFIGURATION START ---
+# --- CONFIGURATION ---
 $RepoRawUrl = "https://raw.githubusercontent.com/AbstractSyntax/GFX_Scripts/main"
 $Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
 $Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.build173.Domain.Setup.exe1"
@@ -9,71 +9,78 @@ $Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/do
 $Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe1"
 
 $OSCTargetIP = "192.168.8.142"
-# --- CONFIGURATION END ---
+$TempDir = "C:\GFX_Temp_Setup" # Using a hard path instead of $env:TEMP for reliability
 
-$TempDir = "$env:TEMP\GFXSetup"
-if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
-New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+# --- PREP ---
+if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force }
+New-Item -ItemType Directory -Path $TempDir -Force
 
-Write-Host "--- Starting GFX Cloud Setup v14 ---" -ForegroundColor Cyan
-
-# FIXED: Removed -f shorthand to prevent the color binding error
 function Download-File {
     param ($Url, $FileName)
-    $Dest = "$TempDir\$FileName"
+    $Dest = Join-Path $TempDir $FileName
+    Write-Host "LOG: Attempting download of $FileName..." -ForegroundColor Gray
     try {
-        Write-Host "DEBUG: Downloading $FileName..." -ForegroundColor Gray
-        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
-        
+        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -MaximumRedirection 5
         if (Test-Path $Dest) {
-            $fSize = (Get-Item $Dest).Length / 1KB
-            # We use a separate variable for the string to avoid the -f / -ForegroundColor conflict
-            $StatusMessage = "DEBUG: $FileName downloaded. Size: {0:N2} KB" -f $fSize
-            Write-Host $StatusMessage -ForegroundColor Green
+            $Size = (Get-Item $Dest).Length / 1KB
+            Write-Host "SUCCESS: $FileName downloaded ($([Math]::Round($Size,2)) KB)" -ForegroundColor Green
             return $Dest
-        } else {
-            Write-Host "DEBUG: $FileName download failed!" -ForegroundColor Red
-            return $null
         }
     } catch {
-        Write-Host "DEBUG: Error downloading $FileName : $($_.Exception.Message)" -ForegroundColor Red
-        return $null
+        Write-Host "ERROR: Failed to download $FileName. $($_.Exception.Message)" -ForegroundColor Red
     }
+    return $null
 }
 
-# --- Download Phase ---
-$oscZip                 = Download-File $Link_OSCPoint      "OSCPoint.zip"
-$inputDirectorInstaller = Download-File $Link_InputDirector "InputDirectorSetup.exe"
-$tallyViewerExe         = Download-File $Link_TallyViewer   "TallyViewer.exe"
-$agentExe               = Download-File $Link_Agent         "agent.exe"
-$inputDirectorConfig    = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
+# --- EXECUTION ---
+Write-Host "--- Starting Setup v15 ---" -ForegroundColor Cyan
 
-# --- SYSTEM PREP ---
-Write-Host "Ensuring PowerPoint is closed for installation..." -ForegroundColor Gray
+# Ensure PowerPoint is closed
 Get-Process "powerpnt" -ErrorAction SilentlyContinue | Stop-Process -Force
 
-Write-Host "Configuring System Services..." -ForegroundColor Gray
-foreach ($Svc in @("LanmanServer", "fdPHost")) {
-    Set-Service -Name $Svc -StartupType Automatic -ErrorAction SilentlyContinue
-    Start-Service -Name $Svc -ErrorAction SilentlyContinue
-}
+# Downloads
+$oscZip = Download-File $Link_OSCPoint "OSCPoint.zip"
+$idInstaller = Download-File $Link_InputDirector "IDSetup.exe"
+$tallyExe = Download-File $Link_TallyViewer "TallyViewer.exe"
+$agentExe = Download-File $Link_Agent "agent.exe"
 
-if ((Get-ComputerInfo).WindowsProductName -notlike "*GFX1*") { Rename-Computer -NewName "GFX1" -Force }
-
-# --- OSCPOINT INSTALLATION ---
-if ($oscZip -and (Test-Path $oscZip)) {
-    Write-Host "--- OSCPoint Deployment ---" -ForegroundColor Cyan
+# --- OSCPOINT BLOCK (HEAVILY DEBUGGED) ---
+Write-Host "`n[OSCPoint Stage]" -ForegroundColor Cyan
+if ($null -ne $oscZip) {
     $oscDir = "C:\OSCPoint"
-    if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force }
-    New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
+    Write-Host "LOG: Creating directory $oscDir..." -ForegroundColor Gray
     
-    Expand-Archive -Path $oscZip -DestinationPath $oscDir -Force
-    Get-ChildItem -Path $oscDir -Recurse | Unblock-File
+    # Force create directory and verify
+    if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force -ErrorAction SilentlyContinue }
+    $folderObj = New-Item -ItemType Directory -Path $oscDir -Force
     
-    $vstoFile = Get-ChildItem -Path $oscDir -Filter "OSCPoint.vsto" -Recurse | Select-Object -First 1
+    if (Test-Path $oscDir) {
+        Write-Host "LOG: Folder $oscDir created successfully." -ForegroundColor Green
+    } else {
+        Write-Host "CRITICAL ERROR: Failed to create C:\OSCPoint. Script cannot continue." -ForegroundColor Red
+        return
+    }
 
-    if ($vstoFile) {
-        Write-Host "Trusting Certificate..." -ForegroundColor Gray
+    Write-Host "LOG: Extracting ZIP..." -ForegroundColor Gray
+    try {
+        Expand-Archive -Path $oscZip -DestinationPath $oscDir -Force
+        $files = Get-ChildItem -Path $oscDir -Recurse
+        Write-Host "LOG: Extracted $($files.Count) files." -ForegroundColor Green
+    } catch {
+        Write-Host "ERROR: Extraction failed! ZIP might be corrupt. $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # Find VSTO
+    $vstoFile = Get-ChildItem -Path $oscDir -Filter "*.vsto" -Recurse | Select-Object -First 1
+    if ($null -eq $vstoFile) {
+        Write-Host "ERROR: Could not find OSCPoint.vsto in $oscDir" -ForegroundColor Red
+        Write-Host "Folder Contents:" -ForegroundColor Gray
+        Get-ChildItem -Path $oscDir -Recurse | Select-Object FullName
+    } else {
+        Write-Host "SUCCESS: Found VSTO at $($vstoFile.FullName)" -ForegroundColor Green
+        
+        # Trust Certificate
+        Write-Host "LOG: Trusting Developer Certificate..." -ForegroundColor Gray
         $cert = (Get-AuthenticodeSignature $vstoFile.FullName).SignerCertificate
         if ($cert) {
             foreach ($storeName in @("Root", "TrustedPublisher")) {
@@ -82,71 +89,62 @@ if ($oscZip -and (Test-Path $oscZip)) {
             }
         }
 
-        Write-Host "Running VSTO Installer..." -ForegroundColor Gray
-        $vstoInstaller = "$env:CommonProgramFiles\microsoft shared\VSTO\10.0\VSTOInstaller.exe"
-        if (Test-Path $vstoInstaller) {
-            # Start and WAIT for completion
-            $proc = Start-Process $vstoInstaller -ArgumentList "/i `"$($vstoFile.FullName)`" /s" -Wait -PassThru
-            Write-Host "Installer finished with code: $($proc.ExitCode)" -ForegroundColor Gray
-        }
+        # Install
+        Write-Host "LOG: Running VSTOInstaller.exe..." -ForegroundColor Gray
+        $vstoPath = "$env:CommonProgramFiles\microsoft shared\VSTO\10.0\VSTOInstaller.exe"
+        $p = Start-Process $vstoPath -ArgumentList "/i `"$($vstoFile.FullName)`" /s" -Wait -PassThru
+        Write-Host "LOG: Installer Exit Code: $($p.ExitCode)" -ForegroundColor Yellow
 
-        # REGISTRY OVERRIDE
-        $regPaths = @(
+        # Registry Registration (The "Force-Load" method)
+        $paths = @(
             "HKLM:\SOFTWARE\Microsoft\Office\PowerPoint\Addins\OSCPoint",
             "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office\PowerPoint\Addins\OSCPoint",
             "HKCU:\Software\Microsoft\Office\PowerPoint\Addins\OSCPoint"
         )
-        foreach ($path in $regPaths) {
-            if (!(Test-Path $path)) { New-Item -Path $path -Force -ErrorAction SilentlyContinue | Out-Null }
-            if (Test-Path $path) {
-                Set-ItemProperty -Path $path -Name "Description" -Value "OSCPoint"
-                Set-ItemProperty -Path $path -Name "FriendlyName" -Value "OSCPoint"
-                Set-ItemProperty -Path $path -Name "Manifest" -Value "$($vstoFile.FullName)|vstolocal"
-                Set-ItemProperty -Path $path -Name "LoadBehavior" -Value 3 -Type DWord
+        foreach ($p in $paths) {
+            if (!(Test-Path $p)) { New-Item $p -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $p) {
+                Set-ItemProperty $p -Name "Manifest" -Value "$($vstoFile.FullName)|vstolocal"
+                Set-ItemProperty $p -Name "LoadBehavior" -Value 3
+                Set-ItemProperty $p -Name "FriendlyName" -Value "OSCPoint"
             }
         }
 
-        # CONFIGURE OSCPOINT SETTINGS
+        # OSC Config
         $oscConfig = "HKCU:\Software\Zinc Event Production Ltd\OSCPoint"
-        if (!(Test-Path $oscConfig)) { New-Item -Path $oscConfig -Force | Out-Null }
-        Set-ItemProperty -Path $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
-        Set-ItemProperty -Path $oscConfig -Name "FeedbackEnabled" -Value "True"
-        Set-ItemProperty -Path $oscConfig -Name "RemotePort" -Value 9000
-        Set-ItemProperty -Path $oscConfig -Name "LocalPort" -Value 8000
-        
-        # FIREWALL
-        $ppPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\powerpnt.exe" -ErrorAction SilentlyContinue)."(default)"
-        if ($ppPath) {
-            New-NetFirewallRule -DisplayName "OSCPoint (PowerPoint)" -Direction Inbound -Program $ppPath -Action Allow -Protocol UDP -LocalPort 8000 -Profile Any -ErrorAction SilentlyContinue
-        }
-        Write-Host "OSCPoint Setup Finished." -ForegroundColor Green
+        if (!(Test-Path $oscConfig)) { New-Item $oscConfig -Force }
+        Set-ItemProperty $oscConfig -Name "RemoteHost" -Value $OSCTargetIP
+        Set-ItemProperty $oscConfig -Name "FeedbackEnabled" -Value "True"
+        Write-Host "SUCCESS: OSCPoint Configured to $OSCTargetIP" -ForegroundColor Green
     }
 }
 
-# --- OTHER APPS ---
-if ($inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
+# --- REMAINING APPS ---
+Write-Host "`n[Other Apps Stage]" -ForegroundColor Cyan
+
+# Agent
+if ($null -ne $agentExe) {
+    $dest = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
+    Copy-Item $agentExe $dest -Force -ErrorAction SilentlyContinue
+    Unblock-File $dest -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "GFX Agent" -Direction Inbound -Program $dest -Action Allow -Profile Any -ErrorAction SilentlyContinue
+    Write-Host "Agent Set." -ForegroundColor Green
+}
+
+# Tally
+if ($null -ne $tallyExe) {
+    Copy-Item $tallyExe "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
+    Write-Host "Tally Set." -ForegroundColor Green
+}
+
+# Input Director
+if ($null -ne $idInstaller) {
     Write-Host "Installing Input Director..." -ForegroundColor Yellow
-    Start-Process -FilePath $inputDirectorInstaller -ArgumentList "/S" -Wait
-    $idCmdPath = "C:\Program Files\Input Director\IDCmd.exe"
-    if (Test-Path $idCmdPath -and (Test-Path $inputDirectorConfig)) {
-        Start-Process -FilePath $idCmdPath -ArgumentList "-importconfig:`"$inputDirectorConfig`"" -Wait
-    }
-}
-
-if ($agentExe -and (Test-Path $agentExe)) {
-    $agentDest = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
-    Copy-Item -Path $agentExe -Destination $agentDest -Force -ErrorAction SilentlyContinue
-    Unblock-File -Path $agentDest -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "GFX Agent" -Direction Inbound -Program $agentDest -Action Allow -Profile Any -ErrorAction SilentlyContinue
-}
-
-if ($tallyViewerExe -and (Test-Path $tallyViewerExe)) {
-    Copy-Item -Path $tallyViewerExe -Destination "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
+    Start-Process $idInstaller -ArgumentList "/S" -Wait
 }
 
 Read-Host -Prompt "Press Enter to continue"
 
-# Cleanup and Restart
-Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "Setup Finished. Restarting..." -ForegroundColor Yellow
-#Restart-Computer -Force
+Write-Host "`nSetup Complete. Restarting..." -ForegroundColor Yellow
+Start-Sleep -Seconds 5
+# Restart-Computer -Force # Uncomment after testing
