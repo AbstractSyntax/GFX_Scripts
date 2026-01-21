@@ -150,6 +150,8 @@ if ($tallyViewerExe -and (Test-Path $tallyViewerExe)) {
     Write-Host "TallyViewer copied to Desktop." -ForegroundColor Green
 }
 
+Read-Host -Prompt "Press Enter to continue"
+
 # Cleanup
 Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 
