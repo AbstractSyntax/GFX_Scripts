@@ -1,15 +1,14 @@
-# v49 - GFX Cloud Setup (System Tweaks + Dependency Fix)
+# v50 - GFX Cloud Setup (Filename Fix & Folder Flattening)
 # Run as Administrator
 
 # --- CONFIGURATION START ---
 $RepoRawUrl = "https://raw.githubusercontent.com/AbstractSyntax/GFX_Scripts/main"
 
 # Download Links
-$Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/InputDirector.v2.3.buil1d173.Domain.Setup.exe"
-$Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/TallyView1er.exe"
-$Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe1"
+$Link_InputDirector = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/rele1ase/InputDirector.v2.3.build173.Domain.Setup.exe"
+$Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/rele1ase/TallyViewer.exe"
+$Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/relea1se/agent.exe"
 $Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
-# Official Microsoft Link for the Engine that OSCPoint needs
 $Link_VSTO_Runtime  = "https://go.microsoft.com/fwlink/?LinkId=158918" 
 
 $OSCTargetIP = "192.168.8.142"
@@ -21,7 +20,7 @@ $TempDir = "$env:TEMP\GFXSetup"
 if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
-Write-Host "--- Starting GFX Cloud Setup v49 ---" -ForegroundColor Cyan
+Write-Host "--- Starting GFX Cloud Setup v50 ---" -ForegroundColor Cyan
 
 # --- HELPER: ROBUST DOWNLOAD ---
 function Download-File {
@@ -45,7 +44,7 @@ $agentExe               = Download-File $Link_Agent         "agent.exe"
 $oscZip                 = Download-File $Link_OSCPoint      "OSCPoint.zip"
 $inputDirectorConfig    = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
 
-# --- STEP 2: SYSTEM TWEAKS (From v6) ---
+# --- STEP 2: SYSTEM TWEAKS ---
 Write-Host "Configuring System Services & Registry..." -ForegroundColor Gray
 
 # Services
@@ -101,11 +100,12 @@ if ($tallyViewerExe -and (Test-Path $tallyViewerExe)) {
     Copy-Item -Path $tallyViewerExe -Destination "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
 }
 
-# --- STEP 4: OSCPOINT INSTALLATION (The Special Handling) ---
+# --- STEP 4: OSCPOINT INSTALLATION (Fixed) ---
 if ($oscZip -and (Test-Path $oscZip)) {
     Write-Host "--- Starting OSCPoint Deployment ---" -ForegroundColor Cyan
     
     $oscDir = "C:\OSCPoint"
+    # Note: We will force the file to this name in the steps below
     $vstoPath = "C:\OSCPoint\OSCPoint.vsto"
 
     # A. Pre-Requisite Check: VSTO Runtime
@@ -124,7 +124,33 @@ if ($oscZip -and (Test-Path $oscZip)) {
     if (Test-Path $oscDir) { Remove-Item $oscDir -Recurse -Force }
     New-Item -ItemType Directory -Path $oscDir -Force | Out-Null
     Expand-Archive -Path $oscZip -DestinationPath $oscDir -Force
-    # CRITICAL: Unblock all files so Office doesn't block them as "Internet" files
+    
+    # --- CRITICAL FIX: FLATTEN FOLDER & RENAME ---
+    # Find the .vsto file wherever it is (subfolder or root)
+    $foundVsto = Get-ChildItem -Path $oscDir -Filter "*.vsto" -Recurse | Select-Object -First 1
+    
+    if ($foundVsto) {
+        Write-Host "Found VSTO at: $($foundVsto.FullName)" -ForegroundColor Gray
+        
+        # If it's in a subfolder, move everything up to Root C:\OSCPoint
+        if ($foundVsto.Directory.FullName -ne $oscDir) {
+            Write-Host "Flattening directory structure..." -ForegroundColor Gray
+            Get-ChildItem -Path $foundVsto.Directory.FullName | Move-Item -Destination $oscDir -Force
+        }
+
+        # Rename the file to remove spaces (Matches $vstoPath)
+        $currentPath = Join-Path $oscDir $foundVsto.Name
+        if ($foundVsto.Name -ne "OSCPoint.vsto") {
+            Write-Host "Renaming to OSCPoint.vsto..." -ForegroundColor Gray
+            Rename-Item -Path $currentPath -NewName "OSCPoint.vsto" -Force
+        }
+    } else {
+        Write-Error "ERROR: No .vsto file found in the zip archive!"
+        # Exit this block to prevent errors downstream
+        continue 
+    }
+    
+    # Unblock everything now that it's in place
     Get-ChildItem -Path $oscDir -Recurse | Unblock-File
 
     # C. Firewall Bypass (PowerPoint)
@@ -177,6 +203,7 @@ if ($oscZip -and (Test-Path $oscZip)) {
     if (!(Test-Path $vstoInstallerPath)) { $vstoInstallerPath = "C:\Program Files (x86)\Common Files\microsoft shared\VSTO\10.0\VSTOInstaller.exe" }
     
     if (Test-Path $vstoInstallerPath) {
+        # Using the now guaranteed path: C:\OSCPoint\OSCPoint.vsto
         Start-Process $vstoInstallerPath -ArgumentList "/i ""$vstoPath""" -PassThru | Out-Null
         Start-Sleep -Seconds 15
         Get-Process "VSTOInstaller" -ErrorAction SilentlyContinue | Stop-Process -Force
