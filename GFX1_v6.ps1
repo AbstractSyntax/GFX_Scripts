@@ -156,4 +156,4 @@ Read-Host -Prompt "Press Enter to continue"
 Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Setup Complete. Restarting..." -ForegroundColor Yellow
-Restart-Computer -Force
+#Restart-Computer -Force
