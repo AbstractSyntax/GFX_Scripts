@@ -1,4 +1,4 @@
-# v50 - GFX Cloud Setup (Filename Fix & Folder Flattening)
+# v6 - GFX Cloud Setup
 # Run as Administrator
 
 # --- CONFIGURATION START ---
@@ -20,7 +20,7 @@ $TempDir = "$env:TEMP\GFXSetup"
 if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
-Write-Host "--- Starting GFX Cloud Setup v50 ---" -ForegroundColor Cyan
+Write-Host "--- Starting GFX Cloud Setup v6 ---" -ForegroundColor Cyan
 
 # --- HELPER: ROBUST DOWNLOAD ---
 function Download-File {
