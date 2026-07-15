@@ -58,9 +58,9 @@ foreach ($Svc in $Services) {
 }
 
 # Hostname
-if ((Get-ComputerInfo).WindowsProductName -notlike "*GFX1*") { 
-    Write-Host "Renaming Computer to GFX1..." -ForegroundColor Yellow
-    Rename-Computer -NewName "GFX1" -Force -ErrorAction SilentlyContinue 
+if ((Get-ComputerInfo).WindowsProductName -notlike "*gfx5*") { 
+    Write-Host "Renaming Computer to gfx5..." -ForegroundColor Yellow
+    Rename-Computer -NewName "gfx5" -Force -ErrorAction SilentlyContinue 
 }
 
 # SMB & Legacy Auth
@@ -78,10 +78,10 @@ Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "LogPixels" -Value 96
 # Firewall & Sharing
 Set-NetFirewallRule -DisplayGroup "Network Discovery" -Enabled True -ErrorAction SilentlyContinue
 Set-NetFirewallRule -DisplayGroup "File and Printer Sharing" -Enabled True -ErrorAction SilentlyContinue
-$sharedFolderPath = "$env:USERPROFILE\Desktop\GFX1"
+$sharedFolderPath = "$env:USERPROFILE\Desktop\gfx5"
 if (!(Test-Path $sharedFolderPath)) { New-Item -ItemType Directory -Path $sharedFolderPath -Force | Out-Null }
-if (!(Get-SmbShare -Name "GFX1" -ErrorAction SilentlyContinue)) { 
-    New-SmbShare -Name "GFX1" -Path $sharedFolderPath -FullAccess "Everyone" -ErrorAction SilentlyContinue 
+if (!(Get-SmbShare -Name "gfx5" -ErrorAction SilentlyContinue)) { 
+    New-SmbShare -Name "gfx5" -Path $sharedFolderPath -FullAccess "Everyone" -ErrorAction SilentlyContinue 
 }
 
 # --- STEP 3: INSTALL EASY APPS ---
