@@ -10,6 +10,7 @@ $Link_TallyViewer   = "https://github.com/AbstractSyntax/GFX_Scripts/releases/do
 $Link_Agent         = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/agent.exe"
 $Link_OSCPoint      = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/oscpoint-2.2.0.0.zip"
 $Link_VSTO_Runtime  = "https://go.microsoft.com/fwlink/?LinkId=158918" 
+$Link_Synergy       = "https://github.com/AbstractSyntax/GFX_Scripts/releases/download/release/synergy-windows-x64.msi"
 
 # OSCPoint Settings
 $OSCTargetIP = "192.168.8.142"
@@ -18,10 +19,84 @@ $LocalPort   = 35551
 # --- CONFIGURATION END ---
 
 $TempDir = "$env:TEMP\GFXSetup"
-if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
-New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
 Write-Host "--- Starting GFX Cloud Setup v6 ---" -ForegroundColor Cyan
+
+$DoSystem = $false
+$DoInputDirector = $false
+$DoAgent = $false
+$DoTally = $false
+$DoSynergy = $false
+$DoOSC = $false
+$FullInstall = $false
+
+while ($true) {
+    Write-Host ""
+    Write-Host "[F] Full install" -ForegroundColor Cyan
+    Write-Host "[P] Pick what to install and configure" -ForegroundColor Cyan
+    $mode = (Read-Host "Choice").Trim()
+    if ($mode -match '^[Ff]$') {
+        $FullInstall = $true
+        $DoSystem = $true
+        $DoInputDirector = $true
+        $DoAgent = $true
+        $DoTally = $true
+        $DoSynergy = $true
+        $DoOSC = $true
+        break
+    }
+    if ($mode -match '^[Pp]$') {
+        Write-Host ""
+        Write-Host "Enter numbers separated by commas. Example: 2,5" -ForegroundColor Gray
+        Write-Host "  1. System setup (computer name, share, firewall)"
+        Write-Host "  2. Input Director"
+        Write-Host "  3. GFX Agent"
+        Write-Host "  4. Tally Viewer"
+        Write-Host "  5. Synergy"
+        Write-Host "  6. OSCPoint"
+        $picked = (Read-Host "Selection").Trim()
+        if ($picked -match '^[Aa](ll)?$') {
+            $FullInstall = $true
+            $DoSystem = $true
+            $DoInputDirector = $true
+            $DoAgent = $true
+            $DoTally = $true
+            $DoSynergy = $true
+            $DoOSC = $true
+            break
+        }
+        $any = $false
+        foreach ($item in ($picked -split '[^0-9]+')) {
+            switch ($item) {
+                "1" { $DoSystem = $true; $any = $true }
+                "2" { $DoInputDirector = $true; $any = $true }
+                "3" { $DoAgent = $true; $any = $true }
+                "4" { $DoTally = $true; $any = $true }
+                "5" { $DoSynergy = $true; $any = $true }
+                "6" { $DoOSC = $true; $any = $true }
+            }
+        }
+        if ($any) { break }
+        Write-Host "Nothing selected. Enter numbers like 1,5 or A for all." -ForegroundColor Yellow
+        continue
+    }
+    Write-Host "Enter F or P." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "Running:" -ForegroundColor Cyan
+if ($DoSystem) { Write-Host "  System setup" }
+if ($DoInputDirector) { Write-Host "  Input Director" }
+if ($DoAgent) { Write-Host "  GFX Agent" }
+if ($DoTally) { Write-Host "  Tally Viewer" }
+if ($DoSynergy) { Write-Host "  Synergy" }
+if ($DoOSC) { Write-Host "  OSCPoint" }
+Write-Host ""
+
+if ($DoInputDirector -or $DoAgent -or $DoTally -or $DoSynergy -or $DoOSC) {
+    if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+}
 
 # --- HELPER: ROBUST DOWNLOAD ---
 function Download-File {
@@ -39,15 +114,8 @@ function Download-File {
     }
 }
 
-# --- STEP 1: DOWNLOAD EVERYTHING ---
-$inputDirectorInstaller = Download-File $Link_InputDirector "InputDirectorSetup.exe"
-$tallyViewerExe         = Download-File $Link_TallyViewer   "TallyViewer.exe"
-$agentExe               = Download-File $Link_Agent         "agent.exe"
-$oscZip                 = Download-File $Link_OSCPoint      "OSCPoint.zip"
-# Restore the XML Config Download
-$inputDirectorConfig    = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
-
 # --- STEP 2: SYSTEM TWEAKS ---
+if ($DoSystem) {
 Write-Host "Configuring System Services & Registry..." -ForegroundColor Gray
 
 # Services
@@ -83,11 +151,16 @@ if (!(Test-Path $sharedFolderPath)) { New-Item -ItemType Directory -Path $shared
 if (!(Get-SmbShare -Name "gfx7" -ErrorAction SilentlyContinue)) { 
     New-SmbShare -Name "gfx7" -Path $sharedFolderPath -FullAccess "Everyone" -ErrorAction SilentlyContinue 
 }
+}
 
 # --- STEP 3: INSTALL EASY APPS ---
 
 # Input Director + Config Import
-if ($inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
+if ($DoInputDirector) {
+    $inputDirectorInstaller = Download-File $Link_InputDirector "InputDirectorSetup.exe"
+    $inputDirectorConfig    = Download-File "$RepoRawUrl/InputDirectorConfig.xml" "InputDirectorConfig.xml"
+}
+if ($DoInputDirector -and $inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
     Write-Host "Installing Input Director..." -ForegroundColor Yellow
     Start-Process -FilePath $inputDirectorInstaller -ArgumentList "/S" -Wait
     
@@ -107,19 +180,36 @@ if ($inputDirectorInstaller -and (Test-Path $inputDirectorInstaller)) {
     }
 }
 
-if ($agentExe -and (Test-Path $agentExe)) {
+if ($DoAgent) {
+    $agentExe = Download-File $Link_Agent "agent.exe"
+}
+if ($DoAgent -and $agentExe -and (Test-Path $agentExe)) {
     $agentDest = "$([System.Environment]::GetFolderPath('CommonStartup'))\agent.exe"
     Copy-Item -Path $agentExe -Destination $agentDest -Force -ErrorAction SilentlyContinue
     Unblock-File -Path $agentDest -ErrorAction SilentlyContinue
     New-NetFirewallRule -DisplayName "GFX Agent" -Direction Inbound -Program $agentDest -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
 }
 
-if ($tallyViewerExe -and (Test-Path $tallyViewerExe)) {
+if ($DoTally) {
+    $tallyViewerExe = Download-File $Link_TallyViewer "TallyViewer.exe"
+}
+if ($DoTally -and $tallyViewerExe -and (Test-Path $tallyViewerExe)) {
     Copy-Item -Path $tallyViewerExe -Destination "$env:USERPROFILE\Desktop\TallyViewer.exe" -Force
 }
 
+if ($DoSynergy) {
+    $synergyInstaller = Download-File $Link_Synergy "SynergySetup.msi"
+}
+if ($DoSynergy -and $synergyInstaller -and (Test-Path $synergyInstaller)) {
+    Write-Host "Installing Synergy..." -ForegroundColor Yellow
+    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$synergyInstaller`" /qn /norestart" -Wait
+}
+
 # --- STEP 4: OSCPOINT INSTALLATION ---
-if ($oscZip -and (Test-Path $oscZip)) {
+if ($DoOSC) {
+    $oscZip = Download-File $Link_OSCPoint "OSCPoint.zip"
+}
+if ($DoOSC -and $oscZip -and (Test-Path $oscZip)) {
     Write-Host "--- Starting OSCPoint Deployment ---" -ForegroundColor Cyan
     
     $oscDir = "C:\OSCPoint"
@@ -223,10 +313,18 @@ if ($oscZip -and (Test-Path $oscZip)) {
 }
 
 # --- CLEANUP & EXIT ---
-Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "---------------------------------------------------" -ForegroundColor Cyan
-Write-Host "Setup Finished. Restarting in 5 Seconds..." -ForegroundColor Green
-Write-Host "---------------------------------------------------" -ForegroundColor Cyan
-
-Start-Sleep -Seconds 5
-Restart-Computer -Force
+if ($FullInstall) {
+    Write-Host "Setup Finished. Restarting in 5 Seconds..." -ForegroundColor Green
+    Write-Host "---------------------------------------------------" -ForegroundColor Cyan
+    Start-Sleep -Seconds 5
+    Restart-Computer -Force
+} else {
+    Write-Host "Selected setup finished." -ForegroundColor Green
+    Write-Host "---------------------------------------------------" -ForegroundColor Cyan
+    if ($DoSystem) {
+        $restartNow = (Read-Host "Restart now so the computer name applies? (Y/N)").Trim()
+        if ($restartNow -match '^[Yy]') { Restart-Computer -Force }
+    }
+}
